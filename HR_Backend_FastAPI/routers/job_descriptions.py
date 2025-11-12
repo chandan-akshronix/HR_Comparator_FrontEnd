@@ -74,11 +74,22 @@ def list_job_descriptions(
     """
     jds = crud.get_all_jds(db, skip, limit, status)
     
-    # Add description preview
+    # Format response with id field and description preview
+    formatted_jds = []
     for jd in jds:
-        jd["description_preview"] = jd.get("description", "")[:200]
+        formatted_jd = {
+            "id": jd.get("_id"),  # Map _id to id
+            "designation": jd.get("designation"),
+            "company": jd.get("company"),
+            "location": jd.get("location"),
+            "status": jd.get("status"),
+            "createdAt": jd.get("createdAt"),
+            "updatedAt": jd.get("updatedAt"),
+            "description_preview": jd.get("description", "")[:200]
+        }
+        formatted_jds.append(formatted_jd)
     
-    return jds
+    return formatted_jds
 
 @router.get("/{jd_id}", response_model=schemas.JobDescriptionResponse)
 def get_job_description(

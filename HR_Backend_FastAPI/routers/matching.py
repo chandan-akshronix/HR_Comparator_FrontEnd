@@ -3,11 +3,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from pymongo.database import Database
 from typing import List, Optional
 from datetime import datetime
+import httpx
 
 import schemas
 import crud
 from database import get_db
 from routers.auth import get_current_user
+from config import AI_AGENT_URL, AI_AGENT_TIMEOUT, AI_AGENT_ENABLED
 
 router = APIRouter(prefix="/matching", tags=["Matching"])
 
@@ -79,6 +81,67 @@ def mock_ai_matching(resume_text: str, jd_text: str) -> dict:
         "confidence_score": 92.0,
         "processing_duration_ms": 2500
     }
+
+async def call_ai_agent_batch(workflow_id: str, jd_text: str, resumes: List[dict]) -> dict:
+    """
+    Call AI Agent container to process multiple resumes
+    
+    Args:
+        workflow_id: Workflow ID (e.g. "WF-1731427200000")
+        jd_text: Full job description text
+        resumes: List of [{resume_id, resume_text}, ...]
+    
+    Returns:
+        {workflow_id, results: [{resume_id, match_score, ...}]}
+    """
+    if not AI_AGENT_ENABLED:
+        print("⚠️ AI Agent disabled, using mock data")
+        # Fallback to mock if agent is disabled
+        return {
+            "workflow_id": workflow_id,
+            "results": [
+                {
+                    "resume_id": r["resume_id"],
+                    **mock_ai_matching(r["resume_text"], jd_text)
+                }
+                for r in resumes
+            ]
+        }
+    
+    try:
+        print(f"🤖 Calling AI Agent at {AI_AGENT_URL}/compare-batch")
+        async with httpx.AsyncClient(timeout=AI_AGENT_TIMEOUT) as client:
+            response = await client.post(
+                f"{AI_AGENT_URL}/compare-batch",
+                json={
+                    "workflow_id": workflow_id,
+                    "jd_text": jd_text,
+                    "resumes": resumes
+                }
+            )
+            
+            if response.status_code == 200:
+                print(f"✅ AI Agent responded successfully")
+                return response.json()
+            else:
+                error_msg = f"AI Agent returned error: {response.status_code} - {response.text}"
+                print(f"❌ {error_msg}")
+                raise Exception(error_msg)
+    
+    except httpx.TimeoutException:
+        error_msg = "AI Agent timeout - processing took too long"
+        print(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
+    except httpx.ConnectError:
+        error_msg = f"Cannot connect to AI Agent at {AI_AGENT_URL} - is it running?"
+        print(f"❌ {error_msg}")
+        raise Exception(error_msg)
+    
+    except Exception as e:
+        error_msg = f"AI Agent error: {str(e)}"
+        print(f"❌ {error_msg}")
+        raise Exception(error_msg)
 
 @router.post("/match", response_model=schemas.ResumeResultResponse)
 def match_resume_with_jd(
@@ -152,7 +215,7 @@ def match_resume_with_jd(
     return result
 
 @router.post("/batch", response_model=schemas.MessageResponse)
-def batch_match_resumes(
+async def batch_match_resumes(  # ✅ Made async!
     batch_request: schemas.MatchingBatchRequest,
     background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user),
@@ -160,11 +223,10 @@ def batch_match_resumes(
 ):
     """
     Match multiple resumes against a job description
-    
-    - **jd_id**: Job Description custom ID
-    - **resume_ids**: List of resume IDs (if None, matches all resumes)
-    - **force_reprocess**: Force reprocessing even if results exist
+    NOW WITH REAL AI AGENT INTEGRATION!
     """
+    from database import FREE_PLAN_RESUME_LIMIT
+    
     # Get JD
     jd = crud.get_jd_by_id(db, batch_request.jd_id)
     if not jd:
@@ -174,15 +236,20 @@ def batch_match_resumes(
     if batch_request.resume_ids:
         resume_ids = batch_request.resume_ids
     else:
-        # Match all resumes
         all_resumes = crud.get_all_resumes(db, 0, 1000)
         resume_ids = [r["_id"] for r in all_resumes]
+    
+    # Enforce 10-resume limit
+    if len(resume_ids) > FREE_PLAN_RESUME_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum {FREE_PLAN_RESUME_LIMIT} resumes allowed per workflow."
+        )
     
     # Generate unique workflow ID
     workflow_id = f"WF-{int(datetime.utcnow().timestamp() * 1000)}"
     
     # Create workflow execution record
-    # Note: Only HR Comparator is actual AI agent, others are data processing steps
     workflow_doc = {
         "workflow_id": workflow_id,
         "jd_id": batch_request.jd_id,
@@ -197,26 +264,27 @@ def batch_match_resumes(
             {
                 "agent_id": "jd-reader",
                 "name": "JD Reader Agent",
-                "status": "completed",  # Parsing done directly, not an agent
+                "status": "completed",
                 "is_ai_agent": False
             },
             {
                 "agent_id": "resume-reader",
                 "name": "Resume Reader Agent",
-                "status": "completed",  # Parsing done directly, not an agent
+                "status": "completed",
                 "is_ai_agent": False
             },
             {
                 "agent_id": "hr-comparator",
                 "name": "HR Comparator Agent",
-                "status": "pending",  # This is the ONLY real AI agent
-                "is_ai_agent": True
+                "status": "in_progress",
+                "is_ai_agent": True,
+                "started_at": datetime.utcnow()
             }
         ],
         "progress": {
-            "completed_agents": 2,  # JD Reader and Resume Reader auto-complete
+            "completed_agents": 2,
             "total_agents": 3,
-            "percentage": 66  # 2/3 agents done (waiting for HR Comparator)
+            "percentage": 66
         },
         "metrics": {
             "total_candidates": len(resume_ids),
@@ -228,29 +296,166 @@ def batch_match_resumes(
     
     workflow_db_id = crud.create_workflow_execution(db, workflow_doc)
     
-    # Log action
-    crud.create_audit_log(db, {
-        "userId": crud.object_id(current_user["_id"]),
-        "action": "start_workflow",
-        "resourceType": "workflow_execution",
-        "resourceId": workflow_id,
-        "ipAddress": "0.0.0.0",
-        "userAgent": "Unknown",
-        "success": True
-    })
-    
-    # TODO: Implement background task for batch processing
-    # For now, return immediate response
-    return {
-        "success": True,
-        "message": f"Workflow started for {len(resume_ids)} resumes",
-        "data": {
-            "workflow_id": workflow_id,
-            "jd_id": batch_request.jd_id,
-            "total_resumes": len(resume_ids),
-            "status": "in_progress"
+    # ============================================
+    # 🚀 CALL AI AGENT (NEW CODE)
+    # ============================================
+    try:
+        # Prepare resumes for AI Agent
+        resumes_data = []
+        for resume_id in resume_ids:
+            resume = crud.get_resume_by_id(db, resume_id)
+            if resume:
+                resumes_data.append({
+                    "resume_id": resume_id,
+                    "resume_text": resume.get("text", "")
+                })
+        
+        # Call AI Agent
+        print(f"🤖 Calling AI Agent for workflow: {workflow_id}")
+        ai_results = await call_ai_agent_batch(
+            workflow_id=workflow_id,
+            jd_text=jd.get("description", ""),
+            resumes=resumes_data
+        )
+        
+        print(f"✅ AI Agent completed for workflow: {workflow_id}")
+        
+        # Save results to database
+        processed_count = 0
+        for result in ai_results["results"]:
+            try:
+                print(f"💾 Saving result for resume: {result['resume_id']}")
+                result_doc = {
+                    "resume_id": crud.object_id(result["resume_id"]),
+                    "jd_id": batch_request.jd_id,
+                    "match_score": result["match_score"],
+                    "fit_category": result["fit_category"],
+                    "jd_extracted": result["jd_extracted"],
+                    "resume_extracted": result["resume_extracted"],
+                    "match_breakdown": result["match_breakdown"],
+                    "selection_reason": result["selection_reason"],
+                    "agent_version": "v1.0.0",
+                    "processing_duration_ms": ai_results.get("processing_time_ms", 0),
+                    "confidence_score": result.get("confidence_score")
+                }
+                
+                # Check if result already exists
+                existing_result = crud.get_result_by_resume_jd(
+                    db, result["resume_id"], batch_request.jd_id
+                )
+                
+                if existing_result:
+                    print(f"🔄 Deleting existing result: {existing_result['_id']}")
+                    crud.delete_result(db, existing_result["_id"])
+                
+                result_id = crud.create_resume_result(db, result_doc)
+                print(f"✅ Saved result with ID: {result_id}")
+                processed_count += 1
+            except Exception as save_error:
+                print(f"❌ Error saving result for resume {result['resume_id']}: {save_error}")
+                import traceback
+                traceback.print_exc()
+                # Continue with next resume even if this one fails
+        
+        # Update workflow status to completed
+        crud.update_workflow_status(db, workflow_id, {
+            "status": "completed",
+            "completed_at": datetime.utcnow(),
+            "processed_resumes": processed_count,
+            "agents": [
+                {
+                    "agent_id": "jd-reader",
+                    "name": "JD Reader Agent",
+                    "status": "completed",
+                    "is_ai_agent": False
+                },
+                {
+                    "agent_id": "resume-reader",
+                    "name": "Resume Reader Agent",
+                    "status": "completed",
+                    "is_ai_agent": False
+                },
+                {
+                    "agent_id": "hr-comparator",
+                    "name": "HR Comparator Agent",
+                    "status": "completed",
+                    "is_ai_agent": True,
+                    "completed_at": datetime.utcnow(),
+                    "duration_ms": ai_results.get("processing_time_ms", 0)
+                }
+            ],
+            "progress": {
+                "completed_agents": 3,
+                "total_agents": 3,
+                "percentage": 100
+            },
+            "metrics": {
+                "total_candidates": len(resume_ids),
+                "processing_time_ms": ai_results.get("processing_time_ms", 0),
+                "match_rate": 100,
+                "top_matches": processed_count
+            }
+        })
+        
+        print(f"✅ Workflow completed: {workflow_id}")
+        
+        # Log action
+        crud.create_audit_log(db, {
+            "userId": crud.object_id(current_user["_id"]),
+            "action": "run_matching",
+            "resourceType": "workflow_execution",
+            "resourceId": workflow_id,
+            "ipAddress": "0.0.0.0",
+            "userAgent": "Unknown",
+            "success": True
+        })
+        
+        return {
+            "success": True,
+            "message": f"AI processing completed for {processed_count} resumes",
+            "data": {
+                "workflow_id": workflow_id,
+                "jd_id": batch_request.jd_id,
+                "total_resumes": len(resume_ids),
+                "processed_resumes": processed_count,
+                "status": "completed"
+            }
         }
-    }
+    
+    except Exception as e:
+        # Update workflow status to failed
+        crud.update_workflow_status(db, workflow_id, {
+            "status": "failed",
+            "error": str(e),
+            "agents": [
+                {
+                    "agent_id": "jd-reader",
+                    "name": "JD Reader Agent",
+                    "status": "completed",
+                    "is_ai_agent": False
+                },
+                {
+                    "agent_id": "resume-reader",
+                    "name": "Resume Reader Agent",
+                    "status": "completed",
+                    "is_ai_agent": False
+                },
+                {
+                    "agent_id": "hr-comparator",
+                    "name": "HR Comparator Agent",
+                    "status": "failed",
+                    "is_ai_agent": True,
+                    "error": str(e)
+                }
+            ]
+        })
+        
+        print(f"❌ Workflow failed: {workflow_id} - {str(e)}")
+        
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI Agent error: {str(e)}"
+        )
 
 @router.get("/results/{jd_id}", response_model=List[schemas.ResumeResultListResponse])
 def get_jd_results(

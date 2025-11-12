@@ -31,6 +31,10 @@ class PyObjectId(str):
 # ---------------------- ENUMS ----------------------
 
 class FitCategory(str, Enum):
+    best_fit = "Best Fit"
+    partial_fit = "Partial Fit"
+    not_fit = "Not Fit"
+    # Legacy values for backward compatibility
     excellent_match = "Excellent Match"
     good_match = "Good Match"
     average_match = "Average Match"
