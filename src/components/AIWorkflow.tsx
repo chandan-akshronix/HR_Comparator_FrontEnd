@@ -82,10 +82,23 @@ export function AIWorkflow() {
 
   const loadWorkflowHistoryFromDB = async () => {
     try {
+      console.log('🔄 Loading workflow history from database...');
       const workflows = await getWorkflowExecutions(0, 10);
+      console.log('📊 Workflows received from API:', workflows);
+      console.log('📊 Number of workflows:', Array.isArray(workflows) ? workflows.length : 'Not an array');
+      
+      // Debug: Check agents in first workflow from API
+      if (workflows && workflows.length > 0) {
+        console.log('🔍 RAW First workflow from API:', workflows[0]);
+        console.log('🔍 RAW Agents from API:', workflows[0].agents);
+      }
       
       // Convert database workflows to frontend format
-      const formattedHistory: WorkflowHistory[] = workflows.map((w: any) => ({
+      const formattedHistory: WorkflowHistory[] = workflows.map((w: any) => {
+        console.log('🔧 Formatting workflow:', w.workflow_id);
+        console.log('🔧 Raw agents before mapping:', w.agents);
+        
+        return {
         id: w.workflow_id,
         timestamp: w.started_at,
         jdId: w.jd_id,
@@ -94,29 +107,61 @@ export function AIWorkflow() {
         completionStatus: w.status === 'completed' ? 'Completed' 
                         : w.status === 'in_progress' ? 'In Progress' 
                         : 'Pending',
-        agents: w.agents?.map((a: any) => ({
-          id: a.agent_id,
-          name: a.name,
-          status: a.status as AgentStatus,
-          icon: getIconForAgent(a.agent_id),
-          timestamp: a.started_at,
-          duration: a.duration_ms ? `${(a.duration_ms / 1000).toFixed(1)}s` : undefined
-        })) || [],
-        metrics: w.metrics || {},
-        progress: w.progress || {}
-      }));
+        agents: w.agents?.map((a: any) => {
+          console.log('🔧 Mapping agent:', a);
+          const mappedAgent = {
+            id: a.agent_id,
+            name: a.name,
+            status: a.status as AgentStatus,
+            icon: getIconForAgent(a.agent_id),
+            timestamp: a.started_at,
+            duration: a.duration_ms ? `${(a.duration_ms / 1000).toFixed(1)}s` : undefined,
+            description: a.name || 'Processing step'
+          };
+          console.log('🔧 Mapped agent:', mappedAgent);
+          return mappedAgent;
+        }) || [
+          {id: 'jd-reader', name: 'JD Reader (Direct Parsing)', status: 'idle' as AgentStatus, icon: FileText, description: 'Waiting for JD upload'},
+          {id: 'resume-reader', name: 'Resume Reader (Direct Parsing)', status: 'idle' as AgentStatus, icon: Users, description: 'Waiting for resumes'},
+          {id: 'hr-comparator', name: 'HR Comparator Agent (AI)', status: 'idle' as AgentStatus, icon: BarChart3, description: 'Waiting to start AI matching'}
+        ],
+        metrics: w.metrics || {
+          totalCandidates: w.total_resumes || 0,
+          processingTime: '0s',
+          matchRate: '0%',
+          topMatches: 0
+        },
+        progress: w.progress || {
+          completed: 0,
+          total: 3,
+          percentage: 0
+        }
+      };
+      });
+      
+      console.log('✅ Formatted workflow history:', formattedHistory);
+      console.log('✅ Number formatted:', formattedHistory.length);
+      
+      // Debug: Check first workflow's agents
+      if (formattedHistory.length > 0) {
+        console.log('🔍 First workflow agents:', formattedHistory[0].agents);
+        if (formattedHistory[0].agents && formattedHistory[0].agents.length > 0) {
+          console.log('🔍 First agent details:', formattedHistory[0].agents[0]);
+        }
+      }
       
       setWorkflowHistory(formattedHistory);
     } catch (err) {
-      console.error('Error loading workflow history from DB:', err);
+      console.error('❌ Error loading workflow history from DB:', err);
       // Fallback to localStorage if API fails
       const savedHistory = localStorage.getItem('workflowHistory');
       if (savedHistory) {
         try {
           const history = JSON.parse(savedHistory);
+          console.log('📦 Loaded from localStorage:', history.length, 'workflows');
           setWorkflowHistory(history);
         } catch (err2) {
-          console.error('Error loading from localStorage:', err2);
+          console.error('❌ Error loading from localStorage:', err2);
         }
       }
     }
@@ -145,12 +190,53 @@ export function AIWorkflow() {
   };
 
   const loadHistoricalWorkflow = (historyId: string) => {
+    console.log('📜 Loading historical workflow:', historyId);
     const historyEntry = workflowHistory.find(h => h.id === historyId);
+    console.log('📜 Found history entry:', historyEntry);
+    console.log('📜 History entry agents:', historyEntry?.agents);
+    
     if (historyEntry) {
-      setAgents(historyEntry.agents);
-      setMetrics(historyEntry.metrics);
-      setProgress(historyEntry.progress);
+      // Map agents from history and ensure they have icons
+      const agentsWithIcons = historyEntry.agents.map((agent: any) => {
+        console.log('🔍 Processing agent:', agent);
+        return {
+          id: agent.id,
+          name: agent.name,
+          status: agent.status as AgentStatus,  // Keep the actual status from DB!
+          icon: agent.icon || getIconForAgent(agent.id),
+          timestamp: agent.timestamp,
+          duration: agent.duration,
+          description: agent.description || ''
+        };
+      });
+      
+      console.log('✅ Setting agents with correct status:', agentsWithIcons);
+      console.log('📊 Metrics:', historyEntry.metrics);
+      console.log('📊 Progress:', historyEntry.progress);
+      
+      setAgents(agentsWithIcons);
+      
+      const metricsToSet = historyEntry.metrics || {
+        totalCandidates: historyEntry.totalCandidates || 0,
+        processingTime: '0s',
+        matchRate: '0%',
+        topMatches: 0
+      };
+      console.log('📊 Setting metrics:', metricsToSet);
+      setMetrics(metricsToSet);
+      
+      const progressToSet = historyEntry.progress || {
+        completed: 2,
+        total: 3,
+        percentage: 66
+      };
+      console.log('📊 Setting progress:', progressToSet);
+      setProgress(progressToSet);
+      
       setIsMonitoring(false); // Disable monitoring for historical data
+      console.log('✅ Historical workflow loaded successfully');
+    } else {
+      console.log('❌ History entry not found for:', historyId);
     }
   };
 
@@ -435,7 +521,7 @@ export function AIWorkflow() {
                           </Badge>
                         </div>
                         <div className="text-xs text-slate-500 mt-1">
-                          {formatHistoryDate(history.timestamp)} • {history.totalCandidates} candidates
+                          <span className="font-mono text-slate-400">ID: {history.id}</span> • {formatHistoryDate(history.timestamp)} • {history.totalCandidates} candidates
                         </div>
                       </div>
                     </SelectItem>
@@ -504,11 +590,11 @@ export function AIWorkflow() {
                       agent.status === 'in-progress' ? 'bg-blue-50' :
                       'bg-slate-50'
                     } ${isExpanded ? 'scale-110' : 'group-hover:scale-105'}`}>
-                      <AgentIcon className={`w-8 h-8 ${
+                      {AgentIcon && <AgentIcon className={`w-8 h-8 ${
                         agent.status === 'completed' ? 'text-green-600' :
                         agent.status === 'in-progress' ? 'text-blue-600' :
                         'text-slate-400'
-                      }`} />
+                      }`} />}
                       
                       {/* Status Badge */}
                       <div className={`absolute -top-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center shadow-md ${
@@ -585,11 +671,11 @@ export function AIWorkflow() {
                         agent.status === 'in-progress' ? 'bg-blue-100' :
                         'bg-slate-100'
                       }`}>
-                        <AgentIcon className={`w-6 h-6 ${
+                        {AgentIcon && <AgentIcon className={`w-6 h-6 ${
                           agent.status === 'completed' ? 'text-green-600' :
                           agent.status === 'in-progress' ? 'text-blue-600' :
                           'text-slate-500'
-                        }`} />
+                        }`} />}
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-1">

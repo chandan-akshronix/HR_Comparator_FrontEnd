@@ -295,7 +295,9 @@ class WorkflowExecutionListResponse(BaseModel):
     completed_at: Optional[datetime] = None
     total_resumes: int
     processed_resumes: int
+    agents: List[AgentExecutionSchema]  # Added agents field!
     progress: Dict[str, Any]
+    metrics: Dict[str, Any]  # Added metrics field!
     
     class Config:
         from_attributes = True

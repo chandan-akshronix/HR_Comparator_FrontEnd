@@ -205,7 +205,25 @@ def get_workflow_executions(
     if status:
         workflows = [w for w in workflows if w.get("status") == status]
     
-    return workflows
+    # Format response to match schema (rename _id to id)
+    formatted_workflows = []
+    for w in workflows:
+        formatted_workflows.append({
+            "id": w["_id"],  # Rename _id to id
+            "workflow_id": w["workflow_id"],
+            "jd_id": w["jd_id"],
+            "jd_title": w["jd_title"],
+            "status": w["status"],
+            "started_at": w["started_at"],
+            "completed_at": w.get("completed_at"),
+            "total_resumes": w["total_resumes"],
+            "processed_resumes": w["processed_resumes"],
+            "agents": w.get("agents", []),  # Include agents!
+            "progress": w.get("progress", {}),
+            "metrics": w.get("metrics", {})  # Include metrics!
+        })
+    
+    return formatted_workflows
 
 @router.get("/executions/{workflow_id}", response_model=schemas.WorkflowExecutionResponse)
 def get_workflow_execution(
@@ -219,7 +237,27 @@ def get_workflow_execution(
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
     
-    return workflow
+    # Format response to match schema (rename _id to id)
+    formatted_workflow = {
+        "id": workflow["_id"],
+        "workflow_id": workflow["workflow_id"],
+        "jd_id": workflow["jd_id"],
+        "jd_title": workflow["jd_title"],
+        "status": workflow["status"],
+        "started_by": workflow["started_by"],
+        "started_at": workflow["started_at"],
+        "completed_at": workflow.get("completed_at"),
+        "total_resumes": workflow["total_resumes"],
+        "processed_resumes": workflow["processed_resumes"],
+        "agents": workflow["agents"],
+        "progress": workflow["progress"],
+        "metrics": workflow["metrics"],
+        "results": workflow.get("results"),
+        "createdAt": workflow["createdAt"],
+        "updatedAt": workflow["updatedAt"]
+    }
+    
+    return formatted_workflow
 
 @router.put("/executions/{workflow_id}/status", response_model=schemas.MessageResponse)
 def update_workflow_execution_status(

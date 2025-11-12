@@ -98,10 +98,6 @@ export function LoginPage({ onLogin, onBackToHome }: LoginPageProps) {
               )}
             </Button>
           </form>
-          <div className="mt-6 pt-6 border-t text-center text-sm text-muted-foreground">
-            <p>Register first at http://localhost:8000/docs</p>
-            <p className="text-xs mt-1">Or create account via API</p>
-          </div>
         </CardContent>
       </Card>
     </div>
