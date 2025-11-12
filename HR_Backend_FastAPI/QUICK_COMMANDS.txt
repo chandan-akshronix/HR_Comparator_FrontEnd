@@ -1,0 +1,43 @@
+HR RESUME COMPARATOR - QUICK COMMANDS
+======================================
+
+1. INSTALL DEPENDENCIES:
+   pip install -r requirements.txt
+
+2. TEST CONNECTION:
+   python test_connection.py
+
+3. START API SERVER (use ONE of these):
+   
+   Option A (Recommended):
+   uvicorn main:app --reload --host 0.0.0.0 --port 8000
+   
+   Option B (Windows):
+   start.bat
+   
+   Option C:
+   python -m uvicorn main:app --reload
+
+4. ACCESS API:
+   API: http://localhost:8000
+   Docs: http://localhost:8000/docs
+   Health: http://localhost:8000/health
+
+5. STOP SERVER:
+   Ctrl+C
+
+======================================
+YOUR SETUP:
+======================================
+✅ MongoDB: mongodb+srv://...@cluster0.wewuhac.mongodb.net/
+✅ Database: hr_resume_comparator
+✅ Storage: MongoDB GridFS
+✅ Limits: 10 resumes, 5MB each
+
+======================================
+AI AGENT INTEGRATION:
+======================================
+Ready to integrate! See: AI_AGENT_INTEGRATION.md
+Location: routers/matching.py line 15
+Just replace mock_ai_matching() function
+
