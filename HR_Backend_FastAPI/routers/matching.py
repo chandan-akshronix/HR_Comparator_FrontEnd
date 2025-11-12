@@ -4,6 +4,7 @@ from pymongo.database import Database
 from typing import List, Optional
 from datetime import datetime
 import httpx
+import json
 
 import schemas
 import crud
@@ -512,16 +513,102 @@ def get_top_matches(
     # Get top matches
     top_results = crud.get_top_matches(db, jd_id, limit)
     
-    # Format response
+    # Helper function to parse experience strings like "4+", "3-5", "5.5"
+    def parse_experience(exp_value):
+        if not exp_value:
+            return 0.0
+        exp_str = str(exp_value).strip()
+        # Remove common suffixes
+        exp_str = exp_str.replace('+', '').replace(' years', '').replace('yrs', '')
+        # Take first number if range (e.g., "3-5" -> "3")
+        if '-' in exp_str:
+            exp_str = exp_str.split('-')[0]
+        try:
+            return float(exp_str)
+        except (ValueError, AttributeError):
+            return 0.0
+    
+    # Helper function to parse resume_extracted (might be JSON string or dict)
+    def parse_resume_data(resume_extracted):
+        if isinstance(resume_extracted, dict):
+            return resume_extracted
+        if isinstance(resume_extracted, str):
+            try:
+                # Remove markdown code blocks
+                cleaned = resume_extracted.replace('```json', '').replace('```', '').strip()
+                return json.loads(cleaned)
+            except Exception as e:
+                print(f"⚠️ Error parsing resume_extracted: {e}")
+                return {}
+        return {}
+    
+    # Get workflow IDs for all resumes (batch lookup for efficiency)
+    from database import WORKFLOW_EXECUTION_COLLECTION
+    workflow_map = {}
+    if top_results:
+        resume_ids = [r["resume_id"] for r in top_results]
+        print(f"🔍 Looking up workflows for {len(resume_ids)} resumes")
+        
+        workflows = list(db[WORKFLOW_EXECUTION_COLLECTION].find(
+            {"resume_ids": {"$in": resume_ids}},
+            {"workflow_id": 1, "resume_ids": 1}
+        ).sort("started_at", -1))
+        
+        print(f"🔍 Found {len(workflows)} workflows")
+        
+        for workflow in workflows:
+            wf_id = workflow.get("workflow_id")
+            print(f"   Workflow: {wf_id} with {len(workflow.get('resume_ids', []))} resumes")
+            for resume_id in workflow.get("resume_ids", []):
+                if resume_id not in workflow_map:
+                    workflow_map[resume_id] = wf_id
+        
+        print(f"🔍 Workflow map created for {len(workflow_map)} resumes")
+    
+    # Format response with full candidate details
     top_matches = []
     for result in top_results:
+        resume_data = parse_resume_data(result.get("resume_extracted", {}))
+        match_breakdown = result.get("match_breakdown", {})
+        
+        print(f"📊 Processing candidate: {resume_data.get('Name', 'Unknown')}")
+        print(f"   Total_Experience_Years: {resume_data.get('Total_Experience_Years')}")
+        print(f"   Career_History: {len(resume_data.get('Career_History', []))} entries")
+        print(f"   Skill_Score: {match_breakdown.get('Skill_Score')}")
+        
+        # Extract current position from Career_History if available
+        current_position = resume_data.get("Current_Position") or resume_data.get("current_position")
+        if not current_position and resume_data.get("Career_History"):
+            career = resume_data.get("Career_History", [])
+            if isinstance(career, list) and len(career) > 0:
+                # Get most recent role
+                latest_job = career[-1] if career else {}
+                current_position = latest_job.get("Role") or latest_job.get("Job_Title")
+        
+        # Get workflow_id from map
+        workflow_id = workflow_map.get(result["resume_id"])
+        print(f"   Workflow ID: {workflow_id}")
+        
         top_matches.append({
             "id": result["_id"],
             "resume_id": str(result["resume_id"]),
             "jd_id": result["jd_id"],
-            "candidate_name": result.get("resume_extracted", {}).get("candidate_name", "Unknown"),
+            "workflow_id": workflow_id,
+            "candidate_name": resume_data.get("Name") or resume_data.get("candidate_name") or "Unknown",
+            "current_position": current_position or "Unknown Position",
+            "email": resume_data.get("Email") or resume_data.get("email") or "",
+            "phone": resume_data.get("Mobile") or resume_data.get("phone") or "",
+            "location": resume_data.get("Current_Location") or resume_data.get("location") or "",
+            "total_experience": parse_experience(resume_data.get("Total_Experience_Years") or resume_data.get("total_experience")),
+            "skills_matched": resume_data.get("Technical_Skills") or resume_data.get("skills_matched") or [],
             "match_score": result["match_score"],
             "fit_category": result["fit_category"],
+            "match_breakdown": {
+                "skills_match": int(match_breakdown.get("Skill_Score") or match_breakdown.get("skills_match") or 0),
+                "experience_match": int(match_breakdown.get("Experience_Score") or match_breakdown.get("experience_match") or 0),
+                "location_match": int(match_breakdown.get("Location_Score") or match_breakdown.get("location_match") or 0),
+                "stability": int(result.get("stability_score") or match_breakdown.get("cultural_fit") or 0)
+            },
             "timestamp": result["timestamp"]
         })
     

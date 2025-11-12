@@ -58,7 +58,7 @@ interface WorkflowHistory {
 
 export function AIWorkflow() {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
-  const [isMonitoring, setIsMonitoring] = useState(false);
+  const [isMonitoring, setIsMonitoring] = useState(true); // Start monitoring by default for live view
   const [loading, setLoading] = useState(true);
   const [agents, setAgents] = useState<AgentStep[]>([]);
   const [metrics, setMetrics] = useState({
@@ -80,23 +80,19 @@ export function AIWorkflow() {
     loadWorkflowHistoryFromDB();
   }, []);
 
+  // When workflowHistory loads and we're viewing a historical workflow, load it
+  useEffect(() => {
+    if (selectedHistoryId !== 'current' && workflowHistory.length > 0) {
+      loadHistoricalWorkflow(selectedHistoryId);
+    }
+  }, [workflowHistory.length]); // Only trigger when length changes (initially loaded)
+
   const loadWorkflowHistoryFromDB = async () => {
     try {
-      console.log('🔄 Loading workflow history from database...');
       const workflows = await getWorkflowExecutions(0, 10);
-      console.log('📊 Workflows received from API:', workflows);
-      console.log('📊 Number of workflows:', Array.isArray(workflows) ? workflows.length : 'Not an array');
-      
-      // Debug: Check agents in first workflow from API
-      if (workflows && workflows.length > 0) {
-        console.log('🔍 RAW First workflow from API:', workflows[0]);
-        console.log('🔍 RAW Agents from API:', workflows[0].agents);
-      }
       
       // Convert database workflows to frontend format
       const formattedHistory: WorkflowHistory[] = workflows.map((w: any) => {
-        console.log('🔧 Formatting workflow:', w.workflow_id);
-        console.log('🔧 Raw agents before mapping:', w.agents);
         
         return {
         id: w.workflow_id,
@@ -108,8 +104,7 @@ export function AIWorkflow() {
                         : w.status === 'in_progress' ? 'In Progress' 
                         : 'Pending',
         agents: w.agents?.map((a: any) => {
-          console.log('🔧 Mapping agent:', a);
-          const mappedAgent = {
+          return {
             id: a.agent_id,
             name: a.name,
             status: a.status as AgentStatus,
@@ -118,37 +113,28 @@ export function AIWorkflow() {
             duration: a.duration_ms ? `${(a.duration_ms / 1000).toFixed(1)}s` : undefined,
             description: a.name || 'Processing step'
           };
-          console.log('🔧 Mapped agent:', mappedAgent);
-          return mappedAgent;
         }) || [
           {id: 'jd-reader', name: 'JD Reader (Direct Parsing)', status: 'idle' as AgentStatus, icon: FileText, description: 'Waiting for JD upload'},
           {id: 'resume-reader', name: 'Resume Reader (Direct Parsing)', status: 'idle' as AgentStatus, icon: Users, description: 'Waiting for resumes'},
           {id: 'hr-comparator', name: 'HR Comparator Agent (AI)', status: 'idle' as AgentStatus, icon: BarChart3, description: 'Waiting to start AI matching'}
         ],
-        metrics: w.metrics || {
-          totalCandidates: w.total_resumes || 0,
-          processingTime: '0s',
-          matchRate: '0%',
-          topMatches: 0
+        metrics: {
+          totalCandidates: w.metrics?.total_candidates || w.total_resumes || 0,
+          processingTime: w.metrics?.processing_time_ms 
+            ? `${(w.metrics.processing_time_ms / 1000).toFixed(1)}s` 
+            : '0s',
+          matchRate: w.metrics?.match_rate 
+            ? `${w.metrics.match_rate}%` 
+            : '0%',
+          topMatches: w.metrics?.top_matches || 0
         },
-        progress: w.progress || {
-          completed: 0,
-          total: 3,
-          percentage: 0
+        progress: {
+          completed: w.progress?.completed_agents || 0,
+          total: w.progress?.total_agents || 3,
+          percentage: w.progress?.percentage || 0
         }
       };
       });
-      
-      console.log('✅ Formatted workflow history:', formattedHistory);
-      console.log('✅ Number formatted:', formattedHistory.length);
-      
-      // Debug: Check first workflow's agents
-      if (formattedHistory.length > 0) {
-        console.log('🔍 First workflow agents:', formattedHistory[0].agents);
-        if (formattedHistory[0].agents && formattedHistory[0].agents.length > 0) {
-          console.log('🔍 First agent details:', formattedHistory[0].agents[0]);
-        }
-      }
       
       setWorkflowHistory(formattedHistory);
     } catch (err) {
@@ -158,10 +144,9 @@ export function AIWorkflow() {
       if (savedHistory) {
         try {
           const history = JSON.parse(savedHistory);
-          console.log('📦 Loaded from localStorage:', history.length, 'workflows');
           setWorkflowHistory(history);
         } catch (err2) {
-          console.error('❌ Error loading from localStorage:', err2);
+          console.error('Error loading from localStorage:', err2);
         }
       }
     }
@@ -171,14 +156,20 @@ export function AIWorkflow() {
   useEffect(() => {
     if (selectedHistoryId === 'current') {
       loadWorkflowStatus();
-      // Refresh every 5 seconds if monitoring is active
-      const interval = isMonitoring ? setInterval(loadWorkflowStatus, 5000) : null;
+      // Auto-enable monitoring for live view
+      setIsMonitoring(true);
+      // Refresh every 3 seconds for real-time feel
+      const interval = isMonitoring ? setInterval(loadWorkflowStatus, 3000) : null;
       return () => {
         if (interval) clearInterval(interval);
       };
     } else {
-      // Load selected history
-      loadHistoricalWorkflow(selectedHistoryId);
+      // Disable monitoring when viewing historical workflows
+      setIsMonitoring(false);
+      // Load selected history (only when workflowHistory is populated)
+      if (workflowHistory.length > 0) {
+        loadHistoricalWorkflow(selectedHistoryId);
+      }
     }
   }, [isMonitoring, selectedHistoryId]);
 
@@ -190,53 +181,92 @@ export function AIWorkflow() {
   };
 
   const loadHistoricalWorkflow = (historyId: string) => {
-    console.log('📜 Loading historical workflow:', historyId);
+    setLoading(true);
+    
     const historyEntry = workflowHistory.find(h => h.id === historyId);
-    console.log('📜 Found history entry:', historyEntry);
-    console.log('📜 History entry agents:', historyEntry?.agents);
     
     if (historyEntry) {
       // Map agents from history and ensure they have icons
-      const agentsWithIcons = historyEntry.agents.map((agent: any) => {
-        console.log('🔍 Processing agent:', agent);
+      const agentsWithIcons = historyEntry.agents.map((agent: any, index: number) => {
+        
+        // Populate inputData, analysis, output based on agent type
+        let inputData, analysis, output;
+        
+        if (agent.id === 'jd-reader') {
+          inputData = {
+            jdsProcessed: historyEntry.totalCandidates || 0,
+            criteriaExtracted: 'Complete'
+          };
+          analysis = inputData;
+          output = inputData;
+        } else if (agent.id === 'resume-reader') {
+          inputData = {
+            candidatesProcessed: historyEntry.totalCandidates || 0,
+            structuredProfiles: historyEntry.totalCandidates || 0,
+            completenessScore: '100%'
+          };
+          analysis = inputData;
+          output = inputData;
+        } else if (agent.id === 'hr-comparator') {
+          inputData = {
+            candidateProfiles: historyEntry.totalCandidates || 0,
+            candidatesScored: historyEntry.totalCandidates || 0,
+            highMatches: historyEntry.metrics?.topMatches || 0,
+            topMatches: `${historyEntry.metrics?.topMatches || 0} candidates ready`
+          };
+          analysis = {
+            totalProcessed: historyEntry.totalCandidates || 0,
+            matchRate: historyEntry.metrics?.matchRate || '0%',
+            avgScore: 'Varied',
+            processingTime: historyEntry.metrics?.processingTime || '0s'
+          };
+          output = {
+            resultsGenerated: historyEntry.totalCandidates || 0,
+            bestFit: Math.floor((historyEntry.metrics?.topMatches || 0) * 0.5),
+            partialFit: Math.floor((historyEntry.metrics?.topMatches || 0) * 0.3),
+            notFit: historyEntry.totalCandidates - (historyEntry.metrics?.topMatches || 0)
+          };
+        }
+        
         return {
           id: agent.id,
           name: agent.name,
-          status: agent.status as AgentStatus,  // Keep the actual status from DB!
+          status: agent.status as AgentStatus,
           icon: agent.icon || getIconForAgent(agent.id),
           timestamp: agent.timestamp,
           duration: agent.duration,
-          description: agent.description || ''
+          description: agent.description || '',
+          inputData: inputData,
+          analysis: analysis,
+          output: output,
+          confidence: agent.id === 'hr-comparator' ? 95 : undefined
         };
       });
       
-      console.log('✅ Setting agents with correct status:', agentsWithIcons);
-      console.log('📊 Metrics:', historyEntry.metrics);
-      console.log('📊 Progress:', historyEntry.progress);
+      // Properly format metrics (handle both formats)
+      const metricsToSet = {
+        totalCandidates: historyEntry.metrics?.totalCandidates || historyEntry.totalCandidates || 0,
+        processingTime: historyEntry.metrics?.processingTime || '0s',
+        matchRate: historyEntry.metrics?.matchRate || '0%',
+        topMatches: historyEntry.metrics?.topMatches || 0
+      };
       
+      // Properly format progress
+      const progressToSet = {
+        completed: historyEntry.progress?.completed || 0,
+        total: historyEntry.progress?.total || 3,
+        percentage: historyEntry.progress?.percentage || 0
+      };
+      
+      // Update all states together
       setAgents(agentsWithIcons);
-      
-      const metricsToSet = historyEntry.metrics || {
-        totalCandidates: historyEntry.totalCandidates || 0,
-        processingTime: '0s',
-        matchRate: '0%',
-        topMatches: 0
-      };
-      console.log('📊 Setting metrics:', metricsToSet);
       setMetrics(metricsToSet);
-      
-      const progressToSet = historyEntry.progress || {
-        completed: 2,
-        total: 3,
-        percentage: 66
-      };
-      console.log('📊 Setting progress:', progressToSet);
       setProgress(progressToSet);
-      
-      setIsMonitoring(false); // Disable monitoring for historical data
-      console.log('✅ Historical workflow loaded successfully');
+      setIsMonitoring(false);
+      setLoading(false);
     } else {
-      console.log('❌ History entry not found for:', historyId);
+      console.error('History entry not found for:', historyId);
+      setLoading(false);
     }
   };
 

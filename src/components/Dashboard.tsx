@@ -33,51 +33,65 @@ export function Dashboard({ onLogout }: DashboardProps) {
     try {
       setLoading(true);
       
-      // Load job descriptions first
+      // Load job descriptions
       const jds = await getJobDescriptions();
       
       if (jds.length > 0) {
-        const firstJD = jds[0];
-        setSelectedJDId(firstJD.id || firstJD._id);
+        // Load matches from ALL JDs, not just the first one
+        const allCandidates: Candidate[] = [];
         
-        // Load top matches for first JD
-        const matches = await getTopMatches(firstJD.id || firstJD._id, 10);
-        
-        // Convert backend format to frontend Candidate format
-        if (matches.top_matches && matches.top_matches.length > 0) {
-          const candidatesData: Candidate[] = matches.top_matches.map((match: any) => ({
-            id: match.id,
-            name: match.candidate_name || 'Unknown',
-            title: match.current_position || 'Unknown Position',
-            email: match.email || '',
-            phone: match.phone || '',
-            location: match.location || '',
-            experience: match.total_experience || 0,
-            skills: match.skills_matched || [],
-            matchScore: Math.round(match.match_score),
-            stabilityScore: Math.round(match.match_breakdown?.cultural_fit || match.match_breakdown?.stability || 0),
-            source: 'direct' as const,
-            status: 'new' as const,
-            matchBreakdown: {
-              skills: Math.round(match.match_breakdown?.skills_match || 0),
-              experience: Math.round(match.match_breakdown?.experience_match || 0),
-              location: Math.round(match.match_breakdown?.location_match || 0),
-              stability: Math.round(match.match_breakdown?.cultural_fit || 0),
+        for (const jd of jds) {
+          try {
+            const jdId = jd.id || jd._id;
+            const matches = await getTopMatches(jdId, 50); // Increased limit to get all
+            
+            if (matches.top_matches && matches.top_matches.length > 0) {
+              const candidatesData: Candidate[] = matches.top_matches.map((match: any) => ({
+                id: match.id,
+                name: match.candidate_name || 'Unknown',
+                title: match.current_position || 'Unknown Position',
+                email: match.email || '',
+                phone: match.phone || '',
+                location: match.location || '',
+                experience: match.total_experience || 0,
+                skills: match.skills_matched || [],
+                matchScore: Math.round(match.match_score),
+                stabilityScore: Math.round(match.match_breakdown?.stability || 0),
+                source: 'direct' as const,
+                status: 'new' as const,
+                matchBreakdown: {
+                  skills: Math.round(match.match_breakdown?.skills_match || 0),
+                  experience: Math.round(match.match_breakdown?.experience_match || 0),
+                  location: Math.round(match.match_breakdown?.location_match || 0),
+                  stability: Math.round(match.match_breakdown?.stability || 0),
+                },
+                workflow_id: match.workflow_id || null,
+                jd_id: jdId // Add JD ID for reference
+              } as any));
+              
+              allCandidates.push(...candidatesData);
             }
-          }));
-          
-          setCandidates(candidatesData);
-        } else {
-          // No matches yet - show empty state
-          setCandidates([]);
+          } catch (jdErr) {
+            console.error(`Error loading matches for JD ${jd.id}:`, jdErr);
+            // Continue with next JD even if this one fails
+          }
         }
+        
+        // Set the first JD as selected
+        setSelectedJDId(jds[0].id || jds[0]._id);
+        
+        // Remove duplicates (same candidate matched to multiple JDs)
+        const uniqueCandidates = allCandidates.filter((candidate, index, self) =>
+          index === self.findIndex((c) => c.id === candidate.id)
+        );
+        
+        setCandidates(uniqueCandidates);
       } else {
         // No JDs yet - show empty state
         setCandidates([]);
       }
     } catch (err) {
       console.error('Error loading candidates:', err);
-      // On error - show empty state, not mock data
       setCandidates([]);
     } finally {
       setLoading(false);
@@ -167,6 +181,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
                   candidates={candidates} 
                   onCandidatesUpdate={setCandidates}
                   isPreview={false}
+                  isLoading={loading}
                 />
               </CardContent>
             </Card>

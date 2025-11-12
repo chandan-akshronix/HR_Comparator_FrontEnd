@@ -26,10 +26,45 @@ async def get_workflow_status(
     - Actual match results
     """
     try:
-        # Get counts from database
-        total_resumes = db[RESUME_COLLECTION].count_documents({})
-        total_jds = db[JOB_DESCRIPTION_COLLECTION].count_documents({})
-        total_matches = db[RESUME_RESULT_COLLECTION].count_documents({})
+        # Get the most recent workflow execution to show current workflow data
+        recent_workflow = db[WORKFLOW_EXECUTION_COLLECTION].find_one(
+            {},
+            sort=[("started_at", -1)]
+        )
+        
+        # If we have a recent workflow, use its data
+        if recent_workflow:
+            workflow_id = recent_workflow.get("workflow_id")
+            resume_ids = recent_workflow.get("resume_ids", [])
+            jd_id = recent_workflow.get("jd_id")
+            
+            print(f"🔍 Loading workflow status for: {workflow_id}")
+            print(f"   Resume IDs: {len(resume_ids)} resumes")
+            print(f"   JD ID: {jd_id}")
+            
+            # Count resumes for THIS workflow only
+            total_resumes = len(resume_ids)
+            
+            # Count JDs (1 JD per workflow)
+            total_jds = 1 if jd_id else 0
+            
+            # Count matches for THIS workflow only
+            total_matches = db[RESUME_RESULT_COLLECTION].count_documents({
+                "resume_id": {"$in": resume_ids},
+                "jd_id": jd_id
+            })
+            
+            print(f"   Total resumes: {total_resumes}")
+            print(f"   Total matches: {total_matches}")
+        else:
+            # No workflows yet - show empty state
+            print(f"⚠️ No workflows found in database")
+            workflow_id = None
+            resume_ids = []
+            jd_id = None
+            total_resumes = 0
+            total_jds = 0
+            total_matches = 0
         
         # Get recent audit logs to determine agent status
         recent_logs = list(
@@ -58,8 +93,15 @@ async def get_workflow_status(
         
         avg_processing_time = sum(processing_times) / len(processing_times) if processing_times else 0
         
-        # Get match statistics
-        matches = list(db[RESUME_RESULT_COLLECTION].find().limit(100))
+        # Get match statistics for THIS workflow only
+        if recent_workflow and resume_ids and jd_id:
+            matches = list(db[RESUME_RESULT_COLLECTION].find({
+                "resume_id": {"$in": resume_ids},
+                "jd_id": jd_id
+            }).limit(100))
+        else:
+            matches = []
+        
         high_matches = [m for m in matches if m.get("match_score", 0) >= 80]
         match_rate = (len(high_matches) / len(matches) * 100) if matches else 0
         
@@ -105,20 +147,46 @@ async def get_workflow_status(
         
         # Step 3: HR Comparator (REAL AI AGENT - The only one!)
         match_logs = [l for l in recent_logs if "match" in l.get("action", "").lower()]
+        
+        # Determine HR Comparator status based on workflow state
+        hr_comparator_status = "idle"
+        hr_comparator_description = "Waiting for matching to start"
+        
+        if recent_workflow:
+            workflow_status = recent_workflow.get("status", "pending")
+            print(f"   Workflow status: {workflow_status}")
+            print(f"   Total matches: {total_matches}")
+            
+            if total_matches > 0:
+                # Has results - completed
+                hr_comparator_status = "completed"
+                hr_comparator_description = f"AI-powered matching: Compared and scored {total_matches} candidate(s)"
+            elif workflow_status == "in_progress":
+                # Workflow is actively running
+                hr_comparator_status = "in-progress"
+                hr_comparator_description = f"AI agent analyzing {total_resumes} candidates in real-time..."
+                print(f"   ⚡ HR Comparator: IN PROGRESS")
+            elif workflow_status == "pending" and total_resumes > 0 and total_jds > 0:
+                # Ready to start but not started yet
+                hr_comparator_status = "pending"
+                hr_comparator_description = "Ready to start matching"
+            
+            print(f"   HR Comparator final status: {hr_comparator_status}")
+        
         agents.append({
             "id": "hr-comparator",
             "name": "HR Comparator Agent",
-            "status": "completed" if total_matches > 0 else "pending" if (total_resumes > 0 and total_jds > 0) else "idle",
+            "status": hr_comparator_status,
             "timestamp": match_logs[0].get("timestamp").isoformat() if match_logs else None,
             "duration": f"{avg_processing_time * 2:.1f}s" if avg_processing_time and total_matches > 0 else None,
-            "description": f"AI-powered matching: Compared and scored {total_matches} candidate(s)" if total_matches > 0 else "Waiting for matching to start",
+            "description": hr_comparator_description,
             "confidence": None,
             "is_ai_agent": True,  # This is the ONLY real AI agent
             "metrics": {
                 "candidateProfiles": total_resumes,
                 "candidatesScored": total_matches,
                 "highMatches": len(high_matches),
-                "topMatches": f"{len(high_matches)} candidates ready" if len(high_matches) > 0 else "No matches yet"
+                "topMatches": f"{len(high_matches)} candidates ready" if len(high_matches) > 0 else "Processing..."
             }
         })
         
@@ -135,11 +203,18 @@ async def get_workflow_status(
             if a["duration"]
         )
         
-        # Get most recent JD for workflow context
-        recent_jd = db[JOB_DESCRIPTION_COLLECTION].find_one(
-            {},
-            sort=[("createdAt", -1)]
-        )
+        # Get JD for THIS workflow
+        recent_jd = None
+        if recent_workflow and jd_id:
+            from bson import ObjectId
+            try:
+                recent_jd = db[JOB_DESCRIPTION_COLLECTION].find_one(
+                    {"_id": ObjectId(jd_id) if isinstance(jd_id, str) else jd_id}
+                )
+            except:
+                recent_jd = db[JOB_DESCRIPTION_COLLECTION].find_one(
+                    {"_id": jd_id}
+                )
         
         return {
             "success": True,
@@ -156,7 +231,8 @@ async def get_workflow_status(
                 "percentage": int(overall_progress)
             },
             "monitoring": True,
-            "jdId": recent_jd["_id"] if recent_jd else None,
+            "workflowId": workflow_id,
+            "jdId": str(recent_jd["_id"]) if recent_jd else None,
             "jdTitle": recent_jd.get("designation", "Job Description") if recent_jd else "Job Description"
         }
         

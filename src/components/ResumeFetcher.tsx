@@ -20,7 +20,10 @@ import {
   FolderOpen,
   Zap,
   Crown,
-  AlertCircle
+  AlertCircle,
+  Lock,
+  Sparkles,
+  Star
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { toast } from 'sonner';
@@ -382,18 +385,27 @@ export function ResumeFetcher({ onFetch, onTabChange }: ResumeFetcherProps) {
       
       const selectedJDData = jobDescriptions.find(jd => jd.id === selectedJD);
       
-      // Start AI matching - backend will match all resumes with this JD
-      const result = await startAIMatching(resumeIds, selectedJDData?.id || selectedJD);
+      // Show success message and redirect immediately
+      toast.success('AI processing started! Watch the agents work in real-time.');
       
-      console.log('AI matching started:', result);
-      toast.success('AI processing started! Check the AI Workflow tab to monitor progress.');
-      
-      // Navigate to AI Workflow tab
+      // Navigate to AI Workflow tab IMMEDIATELY so user can watch progress
       onTabChange('workflow');
+      
+      // Start AI matching in background (don't await - let it process)
+      startAIMatching(resumeIds, selectedJDData?.id || selectedJD)
+        .then(result => {
+          console.log('AI matching completed:', result);
+        })
+        .catch(err => {
+          console.error('AI matching error:', err);
+          // Don't show toast here - user is already on workflow tab
+        })
+        .finally(() => {
+          setIsStartingAI(false);
+        });
     } catch (err: any) {
       console.error('AI start error:', err);
       toast.error('Error starting AI: ' + err.message);
-    } finally {
       setIsStartingAI(false);
     }
   };
@@ -769,134 +781,213 @@ export function ResumeFetcher({ onFetch, onTabChange }: ResumeFetcherProps) {
         )}
       </TabsContent>
 
-      {/* Fetch from Portals Tab */}
+      {/* Fetch from Portals Tab - Upgrade to Pro */}
       <TabsContent value="fetch" className="space-y-6">
-        {/* Search Parameters */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Search Parameters</CardTitle>
-            <CardDescription>
-              Define search criteria for fetching resumes from job portals
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="search-query">Job Title / Keywords</Label>
-                <Input
-                  id="search-query"
-                  placeholder="e.g., Software Engineer, React Developer"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
+        {/* Hero Section */}
+        <Card className="relative overflow-hidden border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-slate-50">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-blue-100/40 rounded-full blur-3xl"></div>
+          <div className="absolute bottom-0 left-0 w-48 h-48 bg-slate-100/40 rounded-full blur-2xl"></div>
+          
+          <CardContent className="pt-12 pb-12 relative">
+            <div className="text-center space-y-6 max-w-2xl mx-auto">
+              {/* Icon */}
+              <div className="flex justify-center">
+                <div className="w-20 h-20 rounded-2xl bg-blue-600 flex items-center justify-center shadow-lg">
+                  <Crown className="w-10 h-10 text-white" />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="location">Location</Label>
-                <Input
-                  id="location"
-                  placeholder="e.g., Bangalore, Remote"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                />
+              
+              {/* Title */}
+              <div>
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <Sparkles className="w-5 h-5 text-blue-600" />
+                  <h2 className="text-3xl font-bold text-slate-900">
+                    Upgrade to Pro
+                  </h2>
+                  <Sparkles className="w-5 h-5 text-blue-600" />
+                </div>
+                <p className="text-lg text-slate-600">
+                  Unlock powerful portal integrations and advanced features
+                </p>
               </div>
+              
+              {/* CTA Button */}
+              <Button 
+                size="lg" 
+                className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl transition-all"
+              >
+                <Crown className="w-5 h-5 mr-2" />
+                Upgrade Now
+              </Button>
             </div>
-            <Button 
-              onClick={handleFetchAll} 
-              disabled={!searchQuery || isFetching !== null}
-              className="w-full"
-            >
-              {isFetching ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Fetching from {isFetching}...
-                </>
-              ) : (
-                <>
-                  <Search className="w-4 h-4 mr-2" />
-                  Fetch from All Sources
-                </>
-              )}
-            </Button>
           </CardContent>
         </Card>
 
-        {/* Individual Sources */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {sources.map((source) => {
-            const isFetchingThis = isFetching === source.name;
-            const isFetched = fetchedSources.includes(source.name);
+        {/* Features Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* LinkedIn Integration */}
+          <Card className="relative overflow-hidden hover:shadow-lg transition-shadow">
+            <div className="absolute top-0 right-0 bg-blue-100 rounded-bl-3xl p-3">
+              <Lock className="w-4 h-4 text-blue-600" />
+            </div>
+            <CardHeader>
+              <div className="text-4xl mb-3">💼</div>
+              <CardTitle className="text-lg">LinkedIn Integration</CardTitle>
+              <CardDescription>
+                Connect to LinkedIn Talent Solutions API
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-2 text-sm text-slate-600">
+                <li className="flex items-start gap-2">
+                  <Star className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                  <span>Search 900M+ professionals</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Star className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                  <span>Advanced filtering options</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Star className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                  <span>Direct candidate outreach</span>
+                </li>
+              </ul>
+            </CardContent>
+          </Card>
 
-            return (
-              <Card key={source.name} className="relative overflow-hidden">
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="text-3xl">{source.icon}</div>
-                      <div>
-                        <CardTitle className="text-lg">{source.name}</CardTitle>
-                        <CardDescription className="text-xs">
-                          {source.description}
-                        </CardDescription>
-                      </div>
-                    </div>
-                    {isFetched && (
-                      <Badge variant="default" className="bg-green-500">
-                        <CheckCircle className="w-3 h-3 mr-1" />
-                        Fetched
-                      </Badge>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <ExternalLink className="w-3 h-3" />
-                    <code className="bg-slate-100 px-2 py-1 rounded">
-                      {source.apiEndpoint}
-                    </code>
-                  </div>
-                  <Button
-                    onClick={() => handleFetch(source.name)}
-                    disabled={!searchQuery || isFetchingThis}
-                    className="w-full"
-                    variant={isFetched ? "outline" : "default"}
-                  >
-                    {isFetchingThis ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Fetching...
-                      </>
-                    ) : isFetched ? (
-                      'Fetch Again'
-                    ) : (
-                      <>
-                        <Search className="w-4 h-4 mr-2" />
-                        Fetch Resumes
-                      </>
-                    )}
-                  </Button>
-                </CardContent>
-              </Card>
-            );
-          })}
+          {/* Indeed Integration */}
+          <Card className="relative overflow-hidden hover:shadow-lg transition-shadow">
+            <div className="absolute top-0 right-0 bg-blue-100 rounded-bl-3xl p-3">
+              <Lock className="w-4 h-4 text-blue-600" />
+            </div>
+            <CardHeader>
+              <div className="text-4xl mb-3">🔍</div>
+              <CardTitle className="text-lg">Indeed Resume Search</CardTitle>
+              <CardDescription>
+                Access Indeed's resume database
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-2 text-sm text-slate-600">
+                <li className="flex items-start gap-2">
+                  <Star className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                  <span>200M+ resume database</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Star className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                  <span>Skill-based matching</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Star className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                  <span>Real-time availability status</span>
+                </li>
+              </ul>
+            </CardContent>
+          </Card>
+
+          {/* Naukri Integration */}
+          <Card className="relative overflow-hidden hover:shadow-lg transition-shadow">
+            <div className="absolute top-0 right-0 bg-blue-100 rounded-bl-3xl p-3">
+              <Lock className="w-4 h-4 text-blue-600" />
+            </div>
+            <CardHeader>
+              <div className="text-4xl mb-3">🇮🇳</div>
+              <CardTitle className="text-lg">Naukri RMS</CardTitle>
+              <CardDescription>
+                India's largest job portal integration
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-2 text-sm text-slate-600">
+                <li className="flex items-start gap-2">
+                  <Star className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                  <span>100M+ Indian professionals</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Star className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                  <span>Location-based search</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Star className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                  <span>Salary range filtering</span>
+                </li>
+              </ul>
+            </CardContent>
+          </Card>
         </div>
 
-        {/* Info Card */}
-        <Card className="bg-blue-50 border-blue-200">
-          <CardContent className="pt-6">
-            <div className="flex gap-3">
-              <div className="text-blue-600">ℹ️</div>
-              <div className="text-sm text-blue-900">
-                <p className="mb-1">
-                  <strong>Note:</strong> This is a demo with mock data. In production:
-                </p>
-                <ul className="list-disc list-inside space-y-1 text-xs">
-                  <li>Connect to LinkedIn Talent Solutions API</li>
-                  <li>Integrate Indeed Resume API with authentication</li>
-                  <li>Set up Naukri RMS API credentials</li>
-                  <li>Configure rate limiting and API quotas</li>
-                  <li>Implement data privacy compliance (GDPR, etc.)</li>
-                </ul>
+        {/* Additional Features */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-blue-600" />
+              Pro Features Included
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center shrink-0">
+                  <CheckCircle className="w-5 h-5 text-green-600" />
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-1">Automated Sourcing</h4>
+                  <p className="text-sm text-slate-600">Schedule automatic resume fetching and updates</p>
+                </div>
               </div>
+              
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+                  <Zap className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-1">Bulk Processing</h4>
+                  <p className="text-sm text-slate-600">Process up to 1000 resumes at once</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+                  <Lock className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-1">Priority API Access</h4>
+                  <p className="text-sm text-slate-600">Higher rate limits and faster processing</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                  <ExternalLink className="w-5 h-5 text-slate-600" />
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-1">Multi-Portal Search</h4>
+                  <p className="text-sm text-slate-600">Search across all portals simultaneously</p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Pricing CTA */}
+        <Card className="border-2 border-blue-200 bg-white">
+          <CardContent className="pt-8 pb-8">
+            <div className="text-center space-y-4">
+              <div>
+                <h3 className="text-2xl font-bold text-slate-900 mb-2">Enterprise Pricing</h3>
+                <p className="text-slate-600">
+                  Custom plans tailored to your organization's needs
+                </p>
+              </div>
+              <Button 
+                size="lg" 
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                Contact Sales
+              </Button>
+              <p className="text-xs text-slate-500">
+                Get a personalized quote • Flexible pricing • Dedicated support
+              </p>
             </div>
           </CardContent>
         </Card>

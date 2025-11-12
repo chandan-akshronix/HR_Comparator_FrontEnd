@@ -170,9 +170,17 @@ class ResumeResultListResponse(BaseModel):
     id: str
     resume_id: str
     jd_id: str
+    workflow_id: Optional[str] = None
     candidate_name: str
+    current_position: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    location: Optional[str] = None
+    total_experience: Optional[float] = None
+    skills_matched: Optional[List[str]] = None
     match_score: float
     fit_category: FitCategory
+    match_breakdown: Optional[Dict[str, Any]] = None
     timestamp: datetime
     
     class Config:
