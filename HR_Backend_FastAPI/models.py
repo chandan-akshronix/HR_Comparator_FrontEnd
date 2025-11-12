@@ -61,6 +61,21 @@ class AuditAction(str, Enum):
     run_matching = "run_matching"
     upload_resume = "upload_resume"
     update_jd = "update_jd"
+    start_workflow = "start_workflow"
+    complete_workflow = "complete_workflow"
+
+class WorkflowStatus(str, Enum):
+    pending = "pending"
+    in_progress = "in_progress"
+    completed = "completed"
+    failed = "failed"
+
+class AgentStatus(str, Enum):
+    idle = "idle"
+    pending = "pending"
+    in_progress = "in_progress"
+    completed = "completed"
+    failed = "failed"
 
 class VirusScanStatus(str, Enum):
     pending = "pending"
@@ -247,6 +262,44 @@ class FileMetadataModel(BaseModel):
     uploadedBy: PyObjectId
     uploadedAt: datetime = Field(default_factory=datetime.utcnow)
     expiresAt: Optional[datetime] = None
+    
+    class Config:
+        populate_by_name = True
+        arbitrary_types_allowed = True
+        json_encoders = {ObjectId: str}
+
+# ---------------------- WORKFLOW EXECUTION MODEL ----------------------
+
+class AgentExecution(BaseModel):
+    agent_id: str
+    name: str
+    status: AgentStatus
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    duration_ms: Optional[int] = None
+    error: Optional[str] = None
+
+class WorkflowExecutionModel(BaseModel):
+    """MongoDB Document Model for Workflow Execution"""
+    id: Optional[PyObjectId] = Field(default=None, alias="_id")
+    workflow_id: str  # Custom ID like "WF-1731427200000"
+    jd_id: str  # FK to JobDescription
+    jd_title: str
+    status: WorkflowStatus = WorkflowStatus.pending
+    started_by: PyObjectId  # FK to User
+    started_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: Optional[datetime] = None
+    resume_ids: List[PyObjectId] = []
+    total_resumes: int = 0
+    processed_resumes: int = 0
+    agents: List[AgentExecution] = []
+    progress: Dict[str, Any] = {}
+    metrics: Dict[str, Any] = {}
+    results: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    error_details: Optional[Dict[str, Any]] = None
+    createdAt: datetime = Field(default_factory=datetime.utcnow)
+    updatedAt: datetime = Field(default_factory=datetime.utcnow)
     
     class Config:
         populate_by_name = True

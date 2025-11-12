@@ -1,10 +1,12 @@
 # routers/workflow.py - AI Workflow Status Endpoints
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pymongo.database import Database
 from datetime import datetime
 from typing import List, Optional
-from database import get_db, RESUME_COLLECTION, JOB_DESCRIPTION_COLLECTION, RESUME_RESULT_COLLECTION, AUDIT_LOG_COLLECTION
+from database import get_db, RESUME_COLLECTION, JOB_DESCRIPTION_COLLECTION, RESUME_RESULT_COLLECTION, AUDIT_LOG_COLLECTION, WORKFLOW_EXECUTION_COLLECTION
 from routers.auth import get_current_user
+import schemas
+import crud
 
 router = APIRouter(prefix="/workflow", tags=["AI Workflow"])
 
@@ -62,27 +64,11 @@ async def get_workflow_status(
         match_rate = (len(high_matches) / len(matches) * 100) if matches else 0
         
         # Build agent statuses
+        # Note: Only HR Comparator is actual AI agent
+        # JD Reader and Resume Reader are direct parsing steps, not AI agents
         agents = []
         
-        # Agent 1: Resume Extractor
-        resume_logs = [l for l in recent_logs if "resume" in l.get("action", "").lower() and "upload" in l.get("action", "").lower()]
-        agents.append({
-            "id": "resume-extractor",
-            "name": "JD & Resume Extractor Agent",
-            "status": "completed" if total_resumes > 0 else "idle",
-            "timestamp": resume_logs[0].get("timestamp").isoformat() if resume_logs else None,
-            "duration": f"{avg_processing_time:.1f}s" if avg_processing_time else None,
-            "description": f"Extracted data from {total_jds} JD(s) and {total_resumes} resume(s)" if total_resumes > 0 else "Waiting for data upload",
-            "confidence": None,  # Remove hardcoded confidence
-            "metrics": {
-                "totalResumes": total_resumes,
-                "totalJDs": total_jds,
-                "resumesExtracted": f"{total_resumes}/{total_resumes}" if total_resumes > 0 else "0/0",
-                "jdExtracted": f"{total_jds}/{total_jds}" if total_jds > 0 else "0/0"
-            }
-        })
-        
-        # Agent 2: JD Reader
+        # Step 1: JD Reader (Direct Parsing - Not an AI Agent)
         jd_logs = [l for l in recent_logs if "job" in l.get("action", "").lower() or "jd" in l.get("action", "").lower()]
         agents.append({
             "id": "jd-reader",
@@ -90,23 +76,26 @@ async def get_workflow_status(
             "status": "completed" if total_jds > 0 else "idle",
             "timestamp": jd_logs[0].get("timestamp").isoformat() if jd_logs else None,
             "duration": f"{avg_processing_time * 0.3:.1f}s" if avg_processing_time and total_jds > 0 else None,
-            "description": f"Analyzed {total_jds} job description(s) and extracted requirements" if total_jds > 0 else "Waiting for JD upload",
-            "confidence": None,  # Remove hardcoded confidence
+            "description": f"Parsed {total_jds} job description(s) and extracted requirements (Direct Parsing)" if total_jds > 0 else "Waiting for JD upload",
+            "confidence": None,
+            "is_ai_agent": False,  # This is direct parsing, not AI
             "metrics": {
                 "jdsProcessed": total_jds,
                 "criteriaExtracted": "Complete" if total_jds > 0 else "Pending"
             }
         })
         
-        # Agent 3: Resume Reader
+        # Step 2: Resume Reader (Direct Parsing - Not an AI Agent)
+        resume_logs = [l for l in recent_logs if "resume" in l.get("action", "").lower() and "upload" in l.get("action", "").lower()]
         agents.append({
             "id": "resume-reader",
             "name": "Resume Reader Agent",
             "status": "completed" if total_resumes > 0 else "idle",
-            "timestamp": resume_logs[0].get("timestamp").isoformat() if resume_logs and len(resume_logs) > 1 else None,
+            "timestamp": resume_logs[0].get("timestamp").isoformat() if resume_logs else None,
             "duration": f"{avg_processing_time * 1.5:.1f}s" if avg_processing_time and total_resumes > 0 else None,
-            "description": f"Extracted candidate details from {total_resumes} resume(s)" if total_resumes > 0 else "Waiting for resumes",
-            "confidence": None,  # Remove hardcoded confidence
+            "description": f"Parsed {total_resumes} resume(s) and extracted candidate details (Direct Parsing)" if total_resumes > 0 else "Waiting for resumes",
+            "confidence": None,
+            "is_ai_agent": False,  # This is direct parsing, not AI
             "metrics": {
                 "candidatesProcessed": total_resumes,
                 "structuredProfiles": total_resumes,
@@ -114,7 +103,7 @@ async def get_workflow_status(
             }
         })
         
-        # Agent 4: HR Comparator
+        # Step 3: HR Comparator (REAL AI AGENT - The only one!)
         match_logs = [l for l in recent_logs if "match" in l.get("action", "").lower()]
         agents.append({
             "id": "hr-comparator",
@@ -122,8 +111,9 @@ async def get_workflow_status(
             "status": "completed" if total_matches > 0 else "pending" if (total_resumes > 0 and total_jds > 0) else "idle",
             "timestamp": match_logs[0].get("timestamp").isoformat() if match_logs else None,
             "duration": f"{avg_processing_time * 2:.1f}s" if avg_processing_time and total_matches > 0 else None,
-            "description": f"Compared and scored {total_matches} candidate(s)" if total_matches > 0 else "Waiting for matching to start",
-            "confidence": None,  # Remove hardcoded confidence
+            "description": f"AI-powered matching: Compared and scored {total_matches} candidate(s)" if total_matches > 0 else "Waiting for matching to start",
+            "confidence": None,
+            "is_ai_agent": True,  # This is the ONLY real AI agent
             "metrics": {
                 "candidateProfiles": total_resumes,
                 "candidatesScored": total_matches,
@@ -133,8 +123,9 @@ async def get_workflow_status(
         })
         
         # Calculate overall progress
+        # Note: Only HR Comparator is actual AI agent, others are parsing steps
         completed_agents = sum(1 for a in agents if a["status"] == "completed")
-        total_agents = len(agents)
+        total_agents = len(agents)  # 3 steps total
         overall_progress = (completed_agents / total_agents) * 100
         
         # Calculate total processing time
@@ -174,10 +165,9 @@ async def get_workflow_status(
         return {
             "success": False,
             "agents": [
-                {"id": "resume-extractor", "name": "JD & Resume Extractor Agent", "status": "idle", "description": "No data yet"},
-                {"id": "jd-reader", "name": "JD Reader Agent", "status": "idle", "description": "No data yet"},
-                {"id": "resume-reader", "name": "Resume Reader Agent", "status": "idle", "description": "No data yet"},
-                {"id": "hr-comparator", "name": "HR Comparator Agent", "status": "idle", "description": "No data yet"}
+                {"id": "jd-reader", "name": "JD Reader Agent", "status": "idle", "description": "No data yet", "is_ai_agent": False},
+                {"id": "resume-reader", "name": "Resume Reader Agent", "status": "idle", "description": "No data yet", "is_ai_agent": False},
+                {"id": "hr-comparator", "name": "HR Comparator Agent", "status": "idle", "description": "No data yet", "is_ai_agent": True}
             ],
             "metrics": {
                 "totalCandidates": 0,
@@ -187,10 +177,124 @@ async def get_workflow_status(
             },
             "progress": {
                 "completed": 0,
-                "total": 4,
+                "total": 3,  # Only 3 steps now
                 "percentage": 0
             },
             "monitoring": False,
             "error": str(e)
         }
+
+@router.get("/executions", response_model=List[schemas.WorkflowExecutionListResponse])
+def get_workflow_executions(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=50),
+    status: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+    db: Database = Depends(get_db)
+):
+    """
+    Get all workflow executions for current user
+    
+    - **skip**: Number of records to skip
+    - **limit**: Maximum records to return (max 50)
+    - **status**: Filter by status (pending/in_progress/completed/failed)
+    """
+    workflows = crud.get_user_workflows(db, current_user["_id"], skip, limit)
+    
+    # Filter by status if provided
+    if status:
+        workflows = [w for w in workflows if w.get("status") == status]
+    
+    return workflows
+
+@router.get("/executions/{workflow_id}", response_model=schemas.WorkflowExecutionResponse)
+def get_workflow_execution(
+    workflow_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Database = Depends(get_db)
+):
+    """Get specific workflow execution details by workflow_id"""
+    workflow = crud.get_workflow_by_id(db, workflow_id)
+    
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    
+    return workflow
+
+@router.put("/executions/{workflow_id}/status", response_model=schemas.MessageResponse)
+def update_workflow_execution_status(
+    workflow_id: str,
+    status_update: schemas.WorkflowStatusUpdate,
+    current_user: dict = Depends(get_current_user),
+    db: Database = Depends(get_db)
+):
+    """Update workflow execution status (for background tasks)"""
+    workflow = crud.get_workflow_by_id(db, workflow_id)
+    
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    
+    # Build update data
+    update_data = status_update.model_dump(exclude_unset=True)
+    
+    # If status is completed, set completed_at
+    if update_data.get("status") == "completed":
+        update_data["completed_at"] = datetime.utcnow()
+    
+    # Update workflow
+    success = crud.update_workflow_status(db, workflow_id, update_data)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to update workflow")
+    
+    return {
+        "success": True,
+        "message": "Workflow status updated successfully"
+    }
+
+@router.delete("/executions/{workflow_id}", response_model=schemas.MessageResponse)
+def delete_workflow_execution(
+    workflow_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Database = Depends(get_db)
+):
+    """Delete workflow execution"""
+    workflow = crud.get_workflow_by_id(db, workflow_id)
+    
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    
+    # Check if user owns this workflow
+    if str(workflow.get("started_by")) != current_user["_id"]:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this workflow")
+    
+    success = crud.delete_workflow(db, workflow_id)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to delete workflow")
+    
+    return {
+        "success": True,
+        "message": "Workflow deleted successfully"
+    }
+
+@router.get("/executions/stats/count")
+def get_workflow_count(
+    status: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+    db: Database = Depends(get_db)
+):
+    """Get total workflow count, optionally filtered by status"""
+    # Get workflows for current user
+    all_workflows = crud.get_user_workflows(db, current_user["_id"], 0, 1000)
+    
+    if status:
+        count = len([w for w in all_workflows if w.get("status") == status])
+    else:
+        count = len(all_workflows)
+    
+    return {
+        "total": count,
+        "status": status
+    }
 

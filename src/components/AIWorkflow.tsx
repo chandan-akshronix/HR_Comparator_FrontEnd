@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { getWorkflowStatus } from '../services/api';
+import { getWorkflowStatus, getWorkflowExecutions } from '../services/api';
 import { 
   CheckCircle, 
   Clock, 
@@ -75,18 +75,52 @@ export function AIWorkflow() {
   const [workflowHistory, setWorkflowHistory] = useState<WorkflowHistory[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string>('current');
 
-  // Load workflow history from localStorage on mount
+  // Load workflow history from database on mount
   useEffect(() => {
-    const savedHistory = localStorage.getItem('workflowHistory');
-    if (savedHistory) {
-      try {
-        const history = JSON.parse(savedHistory);
-        setWorkflowHistory(history);
-      } catch (err) {
-        console.error('Error loading workflow history:', err);
+    loadWorkflowHistoryFromDB();
+  }, []);
+
+  const loadWorkflowHistoryFromDB = async () => {
+    try {
+      const workflows = await getWorkflowExecutions(0, 10);
+      
+      // Convert database workflows to frontend format
+      const formattedHistory: WorkflowHistory[] = workflows.map((w: any) => ({
+        id: w.workflow_id,
+        timestamp: w.started_at,
+        jdId: w.jd_id,
+        jdTitle: w.jd_title,
+        totalCandidates: w.total_resumes,
+        completionStatus: w.status === 'completed' ? 'Completed' 
+                        : w.status === 'in_progress' ? 'In Progress' 
+                        : 'Pending',
+        agents: w.agents?.map((a: any) => ({
+          id: a.agent_id,
+          name: a.name,
+          status: a.status as AgentStatus,
+          icon: getIconForAgent(a.agent_id),
+          timestamp: a.started_at,
+          duration: a.duration_ms ? `${(a.duration_ms / 1000).toFixed(1)}s` : undefined
+        })) || [],
+        metrics: w.metrics || {},
+        progress: w.progress || {}
+      }));
+      
+      setWorkflowHistory(formattedHistory);
+    } catch (err) {
+      console.error('Error loading workflow history from DB:', err);
+      // Fallback to localStorage if API fails
+      const savedHistory = localStorage.getItem('workflowHistory');
+      if (savedHistory) {
+        try {
+          const history = JSON.parse(savedHistory);
+          setWorkflowHistory(history);
+        } catch (err2) {
+          console.error('Error loading from localStorage:', err2);
+        }
       }
     }
-  }, []);
+  };
 
   // Fetch real workflow status from API
   useEffect(() => {
@@ -104,30 +138,10 @@ export function AIWorkflow() {
   }, [isMonitoring, selectedHistoryId]);
 
   const saveWorkflowToHistory = (workflowData: any) => {
-    const percentage = workflowData.progress?.percentage || 0;
-    let status = 'Pending';
-    
-    if (percentage === 100) {
-      status = 'Completed';
-    } else if (percentage > 0 && percentage < 100) {
-      status = 'In Progress';
-    }
-    
-    const historyEntry: WorkflowHistory = {
-      id: `workflow-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      jdId: workflowData.jdId || 'Unknown',
-      jdTitle: workflowData.jdTitle || 'Job Description',
-      totalCandidates: workflowData.metrics?.totalCandidates || 0,
-      completionStatus: status,
-      agents: workflowData.agents || [],
-      metrics: workflowData.metrics || {},
-      progress: workflowData.progress || {}
-    };
-
-    const updatedHistory = [historyEntry, ...workflowHistory].slice(0, 10); // Keep last 10
-    setWorkflowHistory(updatedHistory);
-    localStorage.setItem('workflowHistory', JSON.stringify(updatedHistory));
+    // Note: Workflows are now saved to database automatically by backend
+    // This function is kept for backward compatibility
+    // Just reload from database to get latest
+    loadWorkflowHistoryFromDB();
   };
 
   const loadHistoricalWorkflow = (historyId: string) => {
@@ -166,54 +180,25 @@ export function AIWorkflow() {
         setProgress(data.progress);
         setIsMonitoring(data.monitoring);
 
-        // Save to history whenever workflow has data (including pending/in-progress)
+        // Reload workflow history from database
         if (data.jdId && data.jdTitle) {
-          // Check if this workflow already exists in history
-          const existingIndex = workflowHistory.findIndex(h => h.jdId === data.jdId);
-          
-          if (existingIndex >= 0) {
-            // Update existing workflow entry
-            const updatedHistory = [...workflowHistory];
-            updatedHistory[existingIndex] = {
-              ...updatedHistory[existingIndex],
-              agents: mappedAgents,
-              metrics: data.metrics,
-              progress: data.progress,
-              completionStatus: data.progress?.percentage === 100 ? 'Completed' 
-                              : data.progress?.percentage > 0 ? 'In Progress' 
-                              : 'Pending',
-              timestamp: new Date().toISOString()
-            };
-            setWorkflowHistory(updatedHistory);
-            localStorage.setItem('workflowHistory', JSON.stringify(updatedHistory));
-          } else {
-            // Create new workflow entry
-            saveWorkflowToHistory({
-              agents: mappedAgents,
-              metrics: data.metrics,
-              progress: data.progress,
-              jdId: data.jdId,
-              jdTitle: data.jdTitle
-            });
-          }
+          loadWorkflowHistoryFromDB();
         }
       } else {
-        // No data yet - show idle agents
+        // No data yet - show idle steps (only HR Comparator is actual AI agent)
         setAgents([
-          {id: 'resume-extractor', name: 'JD & Resume Extractor Agent', status: 'idle', icon: Database, description: 'Waiting for data upload'},
-          {id: 'jd-reader', name: 'JD Reader Agent', status: 'idle', icon: FileText, description: 'Waiting for JD'},
-          {id: 'resume-reader', name: 'Resume Reader Agent', status: 'idle', icon: Users, description: 'Waiting for resumes'},
-          {id: 'hr-comparator', name: 'HR Comparator Agent', status: 'idle', icon: BarChart3, description: 'Waiting to start matching'}
+          {id: 'jd-reader', name: 'JD Reader (Direct Parsing)', status: 'idle', icon: FileText, description: 'Waiting for JD upload'},
+          {id: 'resume-reader', name: 'Resume Reader (Direct Parsing)', status: 'idle', icon: Users, description: 'Waiting for resumes'},
+          {id: 'hr-comparator', name: 'HR Comparator Agent (AI)', status: 'idle', icon: BarChart3, description: 'Waiting to start AI matching'}
         ]);
       }
     } catch (err) {
       console.error('Error loading workflow:', err);
-      // Show idle state on error
+      // Show idle state on error (only 3 steps: 2 parsing + 1 AI agent)
       setAgents([
-        {id: 'resume-extractor', name: 'JD & Resume Extractor Agent', status: 'idle', icon: Database, description: 'Waiting for data upload'},
-        {id: 'jd-reader', name: 'JD Reader Agent', status: 'idle', icon: FileText, description: 'Waiting for JD'},
-        {id: 'resume-reader', name: 'Resume Reader Agent', status: 'idle', icon: Users, description: 'Waiting for resumes'},
-        {id: 'hr-comparator', name: 'HR Comparator Agent', status: 'idle', icon: BarChart3, description: 'Waiting to start matching'}
+        {id: 'jd-reader', name: 'JD Reader (Direct Parsing)', status: 'idle', icon: FileText, description: 'Waiting for JD upload'},
+        {id: 'resume-reader', name: 'Resume Reader (Direct Parsing)', status: 'idle', icon: Users, description: 'Waiting for resumes'},
+        {id: 'hr-comparator', name: 'HR Comparator Agent (AI)', status: 'idle', icon: BarChart3, description: 'Waiting to start AI matching'}
       ]);
     } finally {
       setLoading(false);
@@ -222,7 +207,6 @@ export function AIWorkflow() {
 
   const getIconForAgent = (agentId: string) => {
     switch (agentId) {
-      case 'resume-extractor': return Database;
       case 'jd-reader': return FileText;
       case 'resume-reader': return Users;
       case 'hr-comparator': return BarChart3;
@@ -307,7 +291,7 @@ export function AIWorkflow() {
                   {selectedHistoryId === 'current' 
                     ? (isMonitoring ? 'Live monitoring active' : 'Monitoring paused')
                     : 'Viewing saved workflow'}
-                  {' • '}{completedAgents} of {totalAgents} agents completed
+                  {' • '}{completedAgents} of {totalAgents} steps completed (1 AI Agent)
                 </div>
               </div>
             </div>
@@ -479,10 +463,10 @@ export function AIWorkflow() {
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-2">
               <Zap className="w-5 h-5 text-blue-600" />
-              Agent Workflow
+              Workflow Pipeline
             </h3>
             <Badge variant="outline" className="text-xs">
-              {completedAgents}/{totalAgents} Complete
+              {completedAgents}/{totalAgents} Complete • 1 AI Agent
             </Badge>
           </div>
         </div>
@@ -809,10 +793,10 @@ export function AIWorkflow() {
                 <Brain className="w-6 h-6 text-blue-600" />
               </div>
               <div className="flex-1">
-                <h3 className="mb-2">About AI Agent Workflow</h3>
+                <h3 className="mb-2">About AI Workflow Pipeline</h3>
                 <p className="text-sm text-slate-600 leading-relaxed">
-                  Our AgenticAI system employs four specialized AI agents working sequentially to analyze job descriptions, 
-                  process resumes, and identify the best candidate matches with intelligent weighted scoring.
+                  Our system uses a 3-step pipeline: Direct parsing of JD and resumes (Steps 1-2), followed by our 
+                  <strong> AI-powered HR Comparator Agent</strong> (Step 3) that intelligently matches candidates with weighted scoring.
                 </p>
               </div>
             </div>
@@ -826,14 +810,14 @@ export function AIWorkflow() {
                 <TrendingUp className="w-6 h-6 text-green-600" />
               </div>
               <div className="flex-1">
-                <h3 className="mb-2">Performance Metrics</h3>
+                <h3 className="mb-2">AI Performance Metrics</h3>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-600">Total Processing Time</span>
+                    <span className="text-slate-600">AI Processing Time</span>
                     <span className="text-slate-900">{metrics.processingTime}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-600">Match Rate</span>
+                    <span className="text-slate-600">AI Match Rate</span>
                     <span className="text-green-600">{metrics.matchRate}</span>
                   </div>
                 </div>
@@ -845,46 +829,37 @@ export function AIWorkflow() {
 
       {/* Agent Details Info */}
       <Card className="border border-slate-200 bg-gradient-to-br from-slate-50 to-white">
-        <CardContent className="pt-6">
-          <h3 className="mb-4 flex items-center gap-2">
-            <Activity className="w-5 h-5 text-slate-700" />
-            AI Agents Overview
-          </h3>
-          <div className="grid grid-cols-4 gap-4">
+          <CardContent className="pt-6">
+            <h3 className="mb-4 flex items-center gap-2">
+              <Activity className="w-5 h-5 text-slate-700" />
+              Workflow Pipeline Overview
+            </h3>
+          <div className="grid grid-cols-3 gap-6">
             <div className="space-y-2">
               <div className="flex items-center gap-2 mb-2">
-                <Database className="w-4 h-4 text-blue-600" />
-                <span className="text-sm">JD & Resume Extractor</span>
+                <FileText className="w-4 h-4 text-blue-600" />
+                <span className="text-sm font-medium">JD Reader (Direct Parsing)</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Extracts structured data from job descriptions and resumes, storing information in MongoDB for analysis.
+                Directly parses job descriptions to extract requirements, skills, experience, and matching criteria. No AI agent involved.
               </p>
             </div>
             <div className="space-y-2">
               <div className="flex items-center gap-2 mb-2">
-                <FileText className="w-4 h-4 text-green-600" />
-                <span className="text-sm">JD Reader</span>
+                <Users className="w-4 h-4 text-green-600" />
+                <span className="text-sm font-medium">Resume Reader (Direct Parsing)</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Analyzes job descriptions using NLP to extract requirements, skills, experience, and matching criteria.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 mb-2">
-                <Users className="w-4 h-4 text-purple-600" />
-                <span className="text-sm">Resume Reader</span>
-              </div>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Processes candidate resumes to extract skills, experience, projects, education, and qualifications.
+                Directly parses candidate resumes to extract skills, experience, education, and qualifications. No AI agent involved.
               </p>
             </div>
             <div className="space-y-2">
               <div className="flex items-center gap-2 mb-2">
                 <BarChart3 className="w-4 h-4 text-orange-600" />
-                <span className="text-sm">HR Comparator</span>
+                <span className="text-sm font-medium">HR Comparator (AI Agent) 🤖</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Matches candidates against requirements with intelligent weighted scoring and priority-based selection.
+                <strong>REAL AI AGENT:</strong> Uses intelligent algorithms to match candidates against requirements with weighted scoring and priority-based selection.
               </p>
             </div>
           </div>

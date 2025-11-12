@@ -178,15 +178,77 @@ def batch_match_resumes(
         all_resumes = crud.get_all_resumes(db, 0, 1000)
         resume_ids = [r["_id"] for r in all_resumes]
     
+    # Generate unique workflow ID
+    workflow_id = f"WF-{int(datetime.utcnow().timestamp() * 1000)}"
+    
+    # Create workflow execution record
+    # Note: Only HR Comparator is actual AI agent, others are data processing steps
+    workflow_doc = {
+        "workflow_id": workflow_id,
+        "jd_id": batch_request.jd_id,
+        "jd_title": jd.get("designation", "Job Description"),
+        "status": "in_progress",
+        "started_by": crud.object_id(current_user["_id"]),
+        "started_at": datetime.utcnow(),
+        "resume_ids": [crud.object_id(rid) for rid in resume_ids],
+        "total_resumes": len(resume_ids),
+        "processed_resumes": 0,
+        "agents": [
+            {
+                "agent_id": "jd-reader",
+                "name": "JD Reader Agent",
+                "status": "completed",  # Parsing done directly, not an agent
+                "is_ai_agent": False
+            },
+            {
+                "agent_id": "resume-reader",
+                "name": "Resume Reader Agent",
+                "status": "completed",  # Parsing done directly, not an agent
+                "is_ai_agent": False
+            },
+            {
+                "agent_id": "hr-comparator",
+                "name": "HR Comparator Agent",
+                "status": "pending",  # This is the ONLY real AI agent
+                "is_ai_agent": True
+            }
+        ],
+        "progress": {
+            "completed_agents": 2,  # JD Reader and Resume Reader auto-complete
+            "total_agents": 3,
+            "percentage": 66  # 2/3 agents done (waiting for HR Comparator)
+        },
+        "metrics": {
+            "total_candidates": len(resume_ids),
+            "processing_time_ms": 0,
+            "match_rate": 0,
+            "top_matches": 0
+        }
+    }
+    
+    workflow_db_id = crud.create_workflow_execution(db, workflow_doc)
+    
+    # Log action
+    crud.create_audit_log(db, {
+        "userId": crud.object_id(current_user["_id"]),
+        "action": "start_workflow",
+        "resourceType": "workflow_execution",
+        "resourceId": workflow_id,
+        "ipAddress": "0.0.0.0",
+        "userAgent": "Unknown",
+        "success": True
+    })
+    
     # TODO: Implement background task for batch processing
     # For now, return immediate response
     return {
         "success": True,
-        "message": f"Batch matching started for {len(resume_ids)} resumes",
+        "message": f"Workflow started for {len(resume_ids)} resumes",
         "data": {
+            "workflow_id": workflow_id,
             "jd_id": batch_request.jd_id,
             "total_resumes": len(resume_ids),
-            "status": "processing"
+            "status": "in_progress"
         }
     }
 

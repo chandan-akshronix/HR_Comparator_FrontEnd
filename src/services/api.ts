@@ -273,3 +273,46 @@ export const getWorkflowStatus = async (jdId?: string) => {
   return response.json();
 };
 
+// Workflow Execution APIs
+export const getWorkflowExecutions = async (skip: number = 0, limit: number = 10, status?: string) => {
+  const url = status 
+    ? `${API_BASE_URL}/workflow/executions?skip=${skip}&limit=${limit}&status=${status}`
+    : `${API_BASE_URL}/workflow/executions?skip=${skip}&limit=${limit}`;
+    
+  const response = await fetch(url, {
+    headers: {
+      'Authorization': `Bearer ${getAuthToken()}`
+    }
+  });
+  
+  if (!response.ok) throw new Error('Failed to fetch workflow executions');
+  return response.json();
+};
+
+export const getWorkflowExecution = async (workflowId: string) => {
+  const response = await fetch(`${API_BASE_URL}/workflow/executions/${workflowId}`, {
+    headers: {
+      'Authorization': `Bearer ${getAuthToken()}`
+    }
+  });
+  
+  if (!response.ok) throw new Error('Failed to fetch workflow');
+  return response.json();
+};
+
+export const deleteWorkflowExecution = async (workflowId: string) => {
+  const response = await fetch(`${API_BASE_URL}/workflow/executions/${workflowId}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${getAuthToken()}`
+    }
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to delete workflow');
+  }
+  
+  return response.json();
+};
+

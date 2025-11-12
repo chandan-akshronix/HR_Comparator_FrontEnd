@@ -57,14 +57,9 @@ async def upload_resume_file(
     5. Creates resume entry in database
     6. Returns resume_id
     """
-    # Check resume limit (10 max for all users)
-    existing_resumes_count = crud.count_resumes(db)
-    
-    if existing_resumes_count >= FREE_PLAN_RESUME_LIMIT:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Maximum {FREE_PLAN_RESUME_LIMIT} resumes allowed. Please delete old resumes to upload new ones."
-        )
+    # Note: Resume storage is now unlimited
+    # The 10 resume limit is enforced PER WORKFLOW, not globally
+    # This allows multiple workflows with up to 10 resumes each
     
     # Validate file type
     allowed_types = [
@@ -165,13 +160,9 @@ async def upload_resume_file(
             "success": True
         })
         
-        # Calculate remaining uploads
-        new_count = existing_resumes_count + 1
-        remaining = FREE_PLAN_RESUME_LIMIT - new_count
-        
         return {
             "success": True,
-            "message": f"Resume uploaded successfully! ({len(text)} characters extracted). {remaining} uploads remaining.",
+            "message": f"Resume uploaded successfully! ({len(text)} characters extracted). Unlimited uploads available.",
             "file_id": file_id,
             "file_url": f"/files/download-resume/{resume_id}",
             "resume_id": resume_id
@@ -539,12 +530,11 @@ def get_user_file_stats(
     Get user's upload statistics
     
     Returns:
-    - Resume count
-    - Remaining uploads (out of 10)
+    - Resume count (unlimited)
+    - Workflow limit (10 resumes per workflow)
     - Storage used
     """
     resume_count = crud.count_resumes(db)
-    remaining = max(0, FREE_PLAN_RESUME_LIMIT - resume_count)
     
     # Get GridFS storage stats
     from gridfs_storage import get_storage_stats
@@ -552,11 +542,10 @@ def get_user_file_stats(
     
     return {
         "resume_count": resume_count,
-        "limit": FREE_PLAN_RESUME_LIMIT,
-        "remaining": remaining,
+        "limit": "Unlimited",
+        "per_workflow_limit": FREE_PLAN_RESUME_LIMIT,
         "storage_used_mb": storage_stats["total_size_mb"],
-        "storage_limit_mb": FREE_PLAN_RESUME_LIMIT * MAX_FILE_SIZE_MB,
-        "message": f"You have {remaining} resume uploads remaining"
+        "message": f"You have {resume_count} resumes uploaded. Limit: 10 resumes per workflow."
     }
 
 @router.get("/storage-stats")

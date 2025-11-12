@@ -36,6 +36,7 @@ RESUME_RESULT_COLLECTION = "resume_result"
 USER_COLLECTION = "users"
 AUDIT_LOG_COLLECTION = "audit_logs"
 FILE_METADATA_COLLECTION = "files"  # Stores file metadata (actual files in GridFS)
+WORKFLOW_EXECUTION_COLLECTION = "workflow_executions"  # Stores workflow execution records
 
 # Note: With 10 resume limit and 5MB max per file, total storage = 50MB max per user
 # GridFS is perfect for this use case (no external storage needed)
@@ -88,6 +89,13 @@ def init_db():
     db[FILE_METADATA_COLLECTION].create_index("resumeId")
     db[FILE_METADATA_COLLECTION].create_index("checksum")
     db[FILE_METADATA_COLLECTION].create_index("security.virusScanStatus")
+    
+    # Workflow execution indexes
+    db[WORKFLOW_EXECUTION_COLLECTION].create_index("workflow_id", unique=True)
+    db[WORKFLOW_EXECUTION_COLLECTION].create_index([("started_by", 1), ("started_at", -1)])
+    db[WORKFLOW_EXECUTION_COLLECTION].create_index("jd_id")
+    db[WORKFLOW_EXECUTION_COLLECTION].create_index("status")
+    db[WORKFLOW_EXECUTION_COLLECTION].create_index([("started_at", -1)])
     
     print("Database initialization complete!")
 

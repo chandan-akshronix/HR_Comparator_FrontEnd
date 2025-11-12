@@ -11,7 +11,8 @@ from database import (
     RESUME_RESULT_COLLECTION,
     USER_COLLECTION,
     AUDIT_LOG_COLLECTION,
-    FILE_METADATA_COLLECTION
+    FILE_METADATA_COLLECTION,
+    WORKFLOW_EXECUTION_COLLECTION
 )
 
 # ---------------------- HELPER FUNCTIONS ----------------------
@@ -381,4 +382,72 @@ def get_jd_stats(db: Database, jd_id: str) -> dict:
         "best_match_score": round(best_score, 2),
         "candidates_by_category": categories
     }
+
+# ---------------------- WORKFLOW EXECUTION OPERATIONS ----------------------
+
+def create_workflow_execution(db: Database, workflow_data: dict) -> str:
+    """Create a new workflow execution record"""
+    workflow_data["createdAt"] = datetime.utcnow()
+    workflow_data["updatedAt"] = datetime.utcnow()
+    result = db[WORKFLOW_EXECUTION_COLLECTION].insert_one(workflow_data)
+    return str(result.inserted_id)
+
+def get_workflow_by_id(db: Database, workflow_id: str) -> Optional[dict]:
+    """Get workflow by workflow_id (custom string ID)"""
+    workflow = db[WORKFLOW_EXECUTION_COLLECTION].find_one({"workflow_id": workflow_id})
+    return to_dict(workflow) if workflow else None
+
+def get_workflow_by_mongo_id(db: Database, mongo_id: str) -> Optional[dict]:
+    """Get workflow by MongoDB _id"""
+    oid = object_id(mongo_id)
+    if not oid:
+        return None
+    workflow = db[WORKFLOW_EXECUTION_COLLECTION].find_one({"_id": oid})
+    return to_dict(workflow) if workflow else None
+
+def update_workflow_status(db: Database, workflow_id: str, update_data: dict) -> bool:
+    """Update workflow execution status"""
+    update_data["updatedAt"] = datetime.utcnow()
+    result = db[WORKFLOW_EXECUTION_COLLECTION].update_one(
+        {"workflow_id": workflow_id},
+        {"$set": update_data}
+    )
+    return result.modified_count > 0
+
+def get_user_workflows(db: Database, user_id: str, skip: int = 0, limit: int = 10) -> List[dict]:
+    """Get workflows started by a user"""
+    oid = object_id(user_id)
+    if not oid:
+        return []
+    
+    workflows = db[WORKFLOW_EXECUTION_COLLECTION].find(
+        {"started_by": oid}
+    ).sort("started_at", DESCENDING).skip(skip).limit(limit)
+    
+    return [to_dict(w) for w in workflows]
+
+def get_all_workflows(db: Database, skip: int = 0, limit: int = 50, status: Optional[str] = None) -> List[dict]:
+    """Get all workflow executions with optional status filter"""
+    query = {}
+    if status:
+        query["status"] = status
+    
+    workflows = db[WORKFLOW_EXECUTION_COLLECTION].find(query) \
+        .sort("started_at", DESCENDING) \
+        .skip(skip) \
+        .limit(limit)
+    
+    return [to_dict(w) for w in workflows]
+
+def count_workflows(db: Database, status: Optional[str] = None) -> int:
+    """Count total workflows"""
+    query = {}
+    if status:
+        query["status"] = status
+    return db[WORKFLOW_EXECUTION_COLLECTION].count_documents(query)
+
+def delete_workflow(db: Database, workflow_id: str) -> bool:
+    """Delete workflow execution"""
+    result = db[WORKFLOW_EXECUTION_COLLECTION].delete_one({"workflow_id": workflow_id})
+    return result.deleted_count > 0
 

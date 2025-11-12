@@ -1,11 +1,11 @@
 # schemas.py - Pydantic Schemas for API Request/Response
 from pydantic import BaseModel, EmailStr, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from models import (
     FitCategory, ResumeSource, JDStatus, UserRole,
     ExperienceRequired, JDExtracted, Education, WorkHistory,
-    ResumeExtracted, MatchBreakdown
+    ResumeExtracted, MatchBreakdown, WorkflowStatus, AgentStatus
 )
 
 # ---------------------- AUTHENTICATION SCHEMAS ----------------------
@@ -248,4 +248,64 @@ class PaginatedResponse(BaseModel):
     page_size: int
     total_pages: int
     data: List[dict]
+
+# ---------------------- WORKFLOW EXECUTION SCHEMAS ----------------------
+
+class AgentExecutionSchema(BaseModel):
+    agent_id: str
+    name: str
+    status: AgentStatus
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    duration_ms: Optional[int] = None
+    error: Optional[str] = None
+
+class WorkflowExecutionCreate(BaseModel):
+    jd_id: str
+    resume_ids: List[str]
+    
+class WorkflowExecutionResponse(BaseModel):
+    id: str
+    workflow_id: str
+    jd_id: str
+    jd_title: str
+    status: WorkflowStatus
+    started_by: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    total_resumes: int
+    processed_resumes: int
+    agents: List[AgentExecutionSchema]
+    progress: Dict[str, Any]
+    metrics: Dict[str, Any]
+    results: Optional[Dict[str, Any]] = None
+    createdAt: datetime
+    updatedAt: datetime
+    
+    class Config:
+        from_attributes = True
+
+class WorkflowExecutionListResponse(BaseModel):
+    id: str
+    workflow_id: str
+    jd_id: str
+    jd_title: str
+    status: WorkflowStatus
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    total_resumes: int
+    processed_resumes: int
+    progress: Dict[str, Any]
+    
+    class Config:
+        from_attributes = True
+
+class WorkflowStatusUpdate(BaseModel):
+    status: Optional[WorkflowStatus] = None
+    processed_resumes: Optional[int] = None
+    agents: Optional[List[AgentExecutionSchema]] = None
+    progress: Optional[Dict[str, Any]] = None
+    metrics: Optional[Dict[str, Any]] = None
+    results: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
 
