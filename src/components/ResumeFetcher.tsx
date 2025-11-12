@@ -195,7 +195,12 @@ export function ResumeFetcher({ onFetch, onTabChange }: ResumeFetcherProps) {
       
       toast.success('Job description uploaded and parsed successfully!');
     } catch (err: any) {
-      toast.error('Error uploading JD: ' + err.message);
+      const errorMsg = err.message || 'Unknown error';
+      if (errorMsg.includes('already exists')) {
+        toast.error('This job description already exists in the database. Please check the existing JDs.');
+      } else {
+        toast.error('Error uploading JD: ' + errorMsg);
+      }
     } finally {
       setIsUploadingJD(false);
       e.target.value = '';

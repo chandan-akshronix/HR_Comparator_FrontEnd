@@ -144,6 +144,12 @@ async def get_workflow_status(
             if a["duration"]
         )
         
+        # Get most recent JD for workflow context
+        recent_jd = db[JOB_DESCRIPTION_COLLECTION].find_one(
+            {},
+            sort=[("createdAt", -1)]
+        )
+        
         return {
             "success": True,
             "agents": agents,
@@ -158,7 +164,9 @@ async def get_workflow_status(
                 "total": total_agents,
                 "percentage": int(overall_progress)
             },
-            "monitoring": True
+            "monitoring": True,
+            "jdId": recent_jd["_id"] if recent_jd else None,
+            "jdTitle": recent_jd.get("designation", "Job Description") if recent_jd else "Job Description"
         }
         
     except Exception as e:

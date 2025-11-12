@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { getWorkflowStatus } from '../services/api';
 import { 
   CheckCircle, 
@@ -22,7 +23,8 @@ import {
   Play,
   Pause,
   RefreshCw,
-  Download
+  Download,
+  History
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 
@@ -42,6 +44,18 @@ interface AgentStep {
   output?: any;
 }
 
+interface WorkflowHistory {
+  id: string;
+  timestamp: string;
+  jdId: string;
+  jdTitle: string;
+  totalCandidates: number;
+  completionStatus: string;
+  agents: AgentStep[];
+  metrics: any;
+  progress: any;
+}
+
 export function AIWorkflow() {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [isMonitoring, setIsMonitoring] = useState(false);
@@ -58,16 +72,73 @@ export function AIWorkflow() {
     total: 4,
     percentage: 0
   });
+  const [workflowHistory, setWorkflowHistory] = useState<WorkflowHistory[]>([]);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string>('current');
+
+  // Load workflow history from localStorage on mount
+  useEffect(() => {
+    const savedHistory = localStorage.getItem('workflowHistory');
+    if (savedHistory) {
+      try {
+        const history = JSON.parse(savedHistory);
+        setWorkflowHistory(history);
+      } catch (err) {
+        console.error('Error loading workflow history:', err);
+      }
+    }
+  }, []);
 
   // Fetch real workflow status from API
   useEffect(() => {
-    loadWorkflowStatus();
-    // Refresh every 5 seconds if monitoring is active
-    const interval = isMonitoring ? setInterval(loadWorkflowStatus, 5000) : null;
-    return () => {
-      if (interval) clearInterval(interval);
+    if (selectedHistoryId === 'current') {
+      loadWorkflowStatus();
+      // Refresh every 5 seconds if monitoring is active
+      const interval = isMonitoring ? setInterval(loadWorkflowStatus, 5000) : null;
+      return () => {
+        if (interval) clearInterval(interval);
+      };
+    } else {
+      // Load selected history
+      loadHistoricalWorkflow(selectedHistoryId);
+    }
+  }, [isMonitoring, selectedHistoryId]);
+
+  const saveWorkflowToHistory = (workflowData: any) => {
+    const percentage = workflowData.progress?.percentage || 0;
+    let status = 'Pending';
+    
+    if (percentage === 100) {
+      status = 'Completed';
+    } else if (percentage > 0 && percentage < 100) {
+      status = 'In Progress';
+    }
+    
+    const historyEntry: WorkflowHistory = {
+      id: `workflow-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      jdId: workflowData.jdId || 'Unknown',
+      jdTitle: workflowData.jdTitle || 'Job Description',
+      totalCandidates: workflowData.metrics?.totalCandidates || 0,
+      completionStatus: status,
+      agents: workflowData.agents || [],
+      metrics: workflowData.metrics || {},
+      progress: workflowData.progress || {}
     };
-  }, [isMonitoring]);
+
+    const updatedHistory = [historyEntry, ...workflowHistory].slice(0, 10); // Keep last 10
+    setWorkflowHistory(updatedHistory);
+    localStorage.setItem('workflowHistory', JSON.stringify(updatedHistory));
+  };
+
+  const loadHistoricalWorkflow = (historyId: string) => {
+    const historyEntry = workflowHistory.find(h => h.id === historyId);
+    if (historyEntry) {
+      setAgents(historyEntry.agents);
+      setMetrics(historyEntry.metrics);
+      setProgress(historyEntry.progress);
+      setIsMonitoring(false); // Disable monitoring for historical data
+    }
+  };
 
   const loadWorkflowStatus = async () => {
     try {
@@ -94,6 +165,38 @@ export function AIWorkflow() {
         setMetrics(data.metrics);
         setProgress(data.progress);
         setIsMonitoring(data.monitoring);
+
+        // Save to history whenever workflow has data (including pending/in-progress)
+        if (data.jdId && data.jdTitle) {
+          // Check if this workflow already exists in history
+          const existingIndex = workflowHistory.findIndex(h => h.jdId === data.jdId);
+          
+          if (existingIndex >= 0) {
+            // Update existing workflow entry
+            const updatedHistory = [...workflowHistory];
+            updatedHistory[existingIndex] = {
+              ...updatedHistory[existingIndex],
+              agents: mappedAgents,
+              metrics: data.metrics,
+              progress: data.progress,
+              completionStatus: data.progress?.percentage === 100 ? 'Completed' 
+                              : data.progress?.percentage > 0 ? 'In Progress' 
+                              : 'Pending',
+              timestamp: new Date().toISOString()
+            };
+            setWorkflowHistory(updatedHistory);
+            localStorage.setItem('workflowHistory', JSON.stringify(updatedHistory));
+          } else {
+            // Create new workflow entry
+            saveWorkflowToHistory({
+              agents: mappedAgents,
+              metrics: data.metrics,
+              progress: data.progress,
+              jdId: data.jdId,
+              jdTitle: data.jdTitle
+            });
+          }
+        }
       } else {
         // No data yet - show idle agents
         setAgents([
@@ -167,6 +270,16 @@ export function AIWorkflow() {
   const completedAgents = progress.completed;
   const overallProgress = progress.percentage;
 
+  const formatHistoryDate = (timestamp: string) => {
+    const date = new Date(timestamp);
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
   return (
     <div className="space-y-6">
       {/* Professional Header */}
@@ -180,10 +293,21 @@ export function AIWorkflow() {
                 <Brain className="h-7 w-7 text-white" />
               </div>
               <div>
-                <h2 className="text-2xl mb-1">AI Agent Execution Pipeline</h2>
+                <div className="flex items-center gap-3 mb-1">
+                  <h2 className="text-2xl">AI Agent Execution Pipeline</h2>
+                  {selectedHistoryId !== 'current' && (
+                    <Badge className="bg-amber-500 hover:bg-amber-600 text-white">
+                      <History className="w-3 h-3 mr-1" />
+                      Historical View
+                    </Badge>
+                  )}
+                </div>
                 <div className="text-slate-300 text-sm flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${isMonitoring ? 'bg-green-400 animate-pulse' : 'bg-slate-400'}`}></span>
-                  {isMonitoring ? 'Live monitoring active' : 'Monitoring paused'} • {completedAgents} of {totalAgents} agents completed
+                  <span className={`h-2 w-2 rounded-full ${isMonitoring && selectedHistoryId === 'current' ? 'bg-green-400 animate-pulse' : 'bg-slate-400'}`}></span>
+                  {selectedHistoryId === 'current' 
+                    ? (isMonitoring ? 'Live monitoring active' : 'Monitoring paused')
+                    : 'Viewing saved workflow'}
+                  {' • '}{completedAgents} of {totalAgents} agents completed
                 </div>
               </div>
             </div>
@@ -211,6 +335,7 @@ export function AIWorkflow() {
                 variant={isMonitoring ? "secondary" : "outline"} 
                 size="sm"
                 onClick={() => setIsMonitoring(!isMonitoring)}
+                disabled={selectedHistoryId !== 'current'}
                 className={isMonitoring 
                   ? "bg-green-600 text-white hover:bg-green-700 border-0" 
                   : "bg-white/5 hover:bg-white/10 text-white border-white/20"
@@ -266,6 +391,87 @@ export function AIWorkflow() {
           </div>
         </div>
       </div>
+
+      {/* Workflow History Selector - Always Visible */}
+      <Card className="border shadow-md bg-gradient-to-r from-blue-50 to-indigo-50">
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 flex-1">
+              <History className="w-5 h-5 text-blue-600" />
+              <h3 className="text-lg font-semibold text-slate-800">Workflow History</h3>
+              {workflowHistory.length > 0 ? (
+                <Badge variant="outline" className="ml-2 text-xs bg-blue-100 text-blue-700 border-blue-300">
+                  {workflowHistory.length} {workflowHistory.length === 1 ? 'run' : 'runs'}
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="ml-2 text-xs bg-slate-100 text-slate-600 border-slate-300">
+                  No history yet
+                </Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-slate-600">View:</span>
+              <Select value={selectedHistoryId} onValueChange={setSelectedHistoryId}>
+                <SelectTrigger className="w-[320px] bg-white">
+                  <SelectValue placeholder="Select workflow run" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="current">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                      <span className="font-semibold">Current Workflow (Live)</span>
+                    </div>
+                  </SelectItem>
+                  {workflowHistory.length === 0 && (
+                    <SelectItem value="no-history" disabled>
+                      <div className="flex items-center gap-2 text-slate-400">
+                        <span className="text-sm italic">No previous workflows yet</span>
+                      </div>
+                    </SelectItem>
+                  )}
+                  {workflowHistory.map((history) => (
+                    <SelectItem key={history.id} value={history.id}>
+                      <div className="flex flex-col py-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{history.jdTitle}</span>
+                          <Badge 
+                            variant="outline" 
+                            className={`text-xs ${
+                              history.completionStatus === 'Completed' 
+                                ? 'bg-green-50 text-green-700 border-green-300' 
+                                : history.completionStatus === 'In Progress'
+                                ? 'bg-blue-50 text-blue-700 border-blue-300'
+                                : 'bg-amber-50 text-amber-700 border-amber-300'
+                            }`}
+                          >
+                            {history.completionStatus === 'Completed' && '✓ '}
+                            {history.completionStatus === 'In Progress' && '⏳ '}
+                            {history.completionStatus === 'Pending' && '⏸ '}
+                            {history.completionStatus}
+                          </Badge>
+                        </div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          {formatHistoryDate(history.timestamp)} • {history.totalCandidates} candidates
+                        </div>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedHistoryId !== 'current' && (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setSelectedHistoryId('current')}
+                  className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                >
+                  Back to Current
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Agent Flow Visualization */}
       <Card className="overflow-hidden border shadow-lg bg-white">

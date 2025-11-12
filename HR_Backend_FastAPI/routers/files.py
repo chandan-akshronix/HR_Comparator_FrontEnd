@@ -242,6 +242,14 @@ async def upload_jd_file(
     # Calculate checksum
     checksum = calculate_checksum(file_content)
     
+    # Check if JD already exists
+    existing_jd = crud.get_jd_by_id(db, jd_id)
+    if existing_jd:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job Description with ID '{jd_id}' already exists. Please use a different ID or update the existing one."
+        )
+    
     # Store file in MongoDB GridFS
     try:
         grid_file_id = upload_file(
@@ -348,6 +356,139 @@ async def download_resume_file(
         raise HTTPException(
             status_code=500,
             detail=f"Error downloading file: {str(e)}"
+        )
+
+@router.put("/update-jd/{jd_id}", response_model=schemas.FileUploadResponse)
+async def update_jd_file(
+    jd_id: str,
+    file: UploadFile = File(...),
+    designation: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+    db: Database = Depends(get_db)
+):
+    """
+    Update existing job description file
+    
+    - **jd_id**: Existing JD identifier
+    - **designation**: Updated job title/position
+    - **file**: New JD file (max 5MB)
+    """
+    # Check if JD exists
+    existing_jd = crud.get_jd_by_id(db, jd_id)
+    if not existing_jd:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Job Description with ID '{jd_id}' not found. Use POST /upload-jd to create a new one."
+        )
+    
+    # Validate file type
+    allowed_types = [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/plain"
+    ]
+    
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type not allowed. Allowed types: PDF, DOC, DOCX, TXT"
+        )
+    
+    # Read file content
+    file_content = await file.read()
+    file_size = len(file_content)
+    
+    # Validate file size (max 5MB)
+    max_size = MAX_FILE_SIZE_MB * 1024 * 1024
+    if file_size > max_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size: {MAX_FILE_SIZE_MB}MB"
+        )
+    
+    # Extract text
+    text = ""
+    if file.content_type == "application/pdf":
+        text = extract_text_from_pdf(file_content)
+    elif file.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        text = extract_text_from_docx(file_content)
+    elif file.content_type == "text/plain":
+        text = file_content.decode("utf-8")
+    
+    if not text:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not extract text from file"
+        )
+    
+    # Calculate checksum
+    checksum = calculate_checksum(file_content)
+    
+    # Store new file in MongoDB GridFS
+    try:
+        grid_file_id = upload_file(
+            file_content,
+            file.filename,
+            file.content_type,
+            metadata={
+                "uploaded_by": current_user["_id"],
+                "original_name": file.filename,
+                "checksum": checksum,
+                "jd_id": jd_id
+            }
+        )
+        
+        # Update JD entry
+        update_data = {
+            "designation": designation,
+            "description": text,
+            "gridFsFileId": grid_file_id
+        }
+        
+        crud.update_jd(db, jd_id, update_data)
+        
+        # Create file metadata for new version
+        file_metadata = {
+            "jdId": jd_id,
+            "originalName": file.filename,
+            "storagePath": f"gridfs://{grid_file_id}",
+            "fileSize": file_size,
+            "mimeType": file.content_type,
+            "checksum": checksum,
+            "security": {
+                "virusScanStatus": "clean",
+                "encrypted": False
+            },
+            "uploadedBy": crud.object_id(current_user["_id"]),
+            "storageType": "gridfs"
+        }
+        
+        file_id_str = crud.create_file_metadata(db, file_metadata)
+        
+        # Log action
+        crud.create_audit_log(db, {
+            "userId": crud.object_id(current_user["_id"]),
+            "action": "update_jd",
+            "resourceType": "job_description",
+            "resourceId": jd_id,
+            "ipAddress": "0.0.0.0",
+            "userAgent": "Unknown",
+            "success": True
+        })
+        
+        return {
+            "success": True,
+            "message": f"Job Description updated successfully ({len(text)} characters extracted)",
+            "file_id": file_id_str,
+            "file_url": f"/files/download-jd/{jd_id}",
+            "resume_id": jd_id
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error updating JD: {str(e)}"
         )
 
 @router.get("/download-jd/{jd_id}")
