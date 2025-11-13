@@ -196,12 +196,10 @@ async def get_workflow_status(
         total_agents = len(agents)  # 3 steps total
         overall_progress = (completed_agents / total_agents) * 100
         
-        # Calculate total processing time
-        total_processing_time = sum(
-            float(a["duration"].replace("s", "")) 
-            for a in agents 
-            if a["duration"]
-        )
+        # Get actual processing time from workflow metrics
+        workflow_metrics = recent_workflow.get("metrics", {})
+        total_processing_time_ms = workflow_metrics.get("processing_time_ms", 0)
+        total_processing_time = total_processing_time_ms / 1000 if total_processing_time_ms > 0 else 0
         
         # Get JD for THIS workflow
         recent_jd = None
@@ -216,8 +214,13 @@ async def get_workflow_status(
                     {"_id": jd_id}
                 )
         
+        # Determine if we should continue monitoring
+        workflow_status = recent_workflow.get("status", "idle")
+        should_monitor = workflow_status in ["in_progress", "pending"]
+        
         return {
             "success": True,
+            "status": workflow_status,  # Add status to response
             "agents": agents,
             "metrics": {
                 "totalCandidates": total_resumes,
@@ -230,7 +233,7 @@ async def get_workflow_status(
                 "total": total_agents,
                 "percentage": int(overall_progress)
             },
-            "monitoring": True,
+            "monitoring": should_monitor,  # ✅ FIXED: Only True if in_progress/pending
             "workflowId": workflow_id,
             "jdId": str(recent_jd["_id"]) if recent_jd else None,
             "jdTitle": recent_jd.get("designation", "Job Description") if recent_jd else "Job Description"
@@ -240,6 +243,7 @@ async def get_workflow_status(
         # Return empty state on error
         return {
             "success": False,
+            "status": "idle",
             "agents": [
                 {"id": "jd-reader", "name": "JD Reader Agent", "status": "idle", "description": "No data yet", "is_ai_agent": False},
                 {"id": "resume-reader", "name": "Resume Reader Agent", "status": "idle", "description": "No data yet", "is_ai_agent": False},

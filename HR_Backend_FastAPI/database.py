@@ -15,7 +15,7 @@ MONGODB_URL = os.getenv(
 DATABASE_NAME = os.getenv("DATABASE_NAME", "hr_resume_comparator")
 
 # System Limits
-FREE_PLAN_RESUME_LIMIT = 10  # Max resumes for free plan
+FREE_PLAN_RESUME_LIMIT = 100  # Max resumes per workflow (increased from 10)
 MAX_FILE_SIZE_MB = 5  # Max 5MB per file
 
 # Synchronous MongoDB client (for non-async operations)
@@ -75,6 +75,7 @@ def init_db():
     db[RESUME_RESULT_COLLECTION].create_index("fit_category")
     db[RESUME_RESULT_COLLECTION].create_index([("timestamp", -1)])
     db[RESUME_RESULT_COLLECTION].create_index([("jd_id", 1), ("match_score", -1)])
+    db[RESUME_RESULT_COLLECTION].create_index("workflow_id")  # NEW: For workflow lookups
     
     # User collection indexes
     db[USER_COLLECTION].create_index("email", unique=True)

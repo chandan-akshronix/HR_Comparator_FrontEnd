@@ -74,7 +74,7 @@ export function ResumeFetcher({ onFetch, onTabChange }: ResumeFetcherProps) {
   const [isStartingAI, setIsStartingAI] = useState(false);
   
   // Free plan limit
-  const FREE_PLAN_LIMIT = 10;
+  const FREE_PLAN_LIMIT = 100;  // Increased resume limit per workflow
   const isPremium = false; // Set to true for premium users
 
   const sources = [

@@ -155,14 +155,18 @@ export function AIWorkflow() {
   // Fetch real workflow status from API
   useEffect(() => {
     if (selectedHistoryId === 'current') {
-      loadWorkflowStatus();
-      // Auto-enable monitoring for live view
-      setIsMonitoring(true);
-      // Refresh every 3 seconds for real-time feel
-      const interval = isMonitoring ? setInterval(loadWorkflowStatus, 3000) : null;
-      return () => {
-        if (interval) clearInterval(interval);
-      };
+      // Only set up polling if monitoring is enabled
+      if (isMonitoring) {
+        // Load initial status immediately
+        loadWorkflowStatus();
+        
+        // Then refresh every 5 seconds
+        const interval = setInterval(loadWorkflowStatus, 5000);
+        return () => clearInterval(interval);
+      } else {
+        // If monitoring disabled, just load once
+        loadWorkflowStatus();
+      }
     } else {
       // Disable monitoring when viewing historical workflows
       setIsMonitoring(false);
@@ -276,6 +280,21 @@ export function AIWorkflow() {
       const data = await getWorkflowStatus();
       
       if (data.success) {
+        // Check if this is a new workflow starting (status = in_progress but no completed agents yet)
+        const isNewWorkflow = data.status === 'in_progress' && 
+                             data.progress?.completed_agents === 0;
+        
+        // If new workflow starting and we have old completed data, clear it first
+        if (isNewWorkflow && agents.length > 0 && agents.every(a => a.status === 'completed')) {
+          console.log('🔄 New workflow detected, clearing old data');
+          // Reset to in-progress state
+          setAgents([
+            {id: 'jd-reader', name: 'JD Reader (Direct Parsing)', status: 'completed', icon: FileText, description: 'Parsing completed'},
+            {id: 'resume-reader', name: 'Resume Reader (Direct Parsing)', status: 'completed', icon: Users, description: 'Parsing completed'},
+            {id: 'hr-comparator', name: 'HR Comparator Agent (AI)', status: 'in-progress', icon: BarChart3, description: 'AI processing...'}
+          ]);
+        }
+        
         // Map backend agents to frontend format
         const mappedAgents: AgentStep[] = data.agents.map((agent: any) => ({
           id: agent.id,
@@ -294,10 +313,15 @@ export function AIWorkflow() {
         setAgents(mappedAgents);
         setMetrics(data.metrics);
         setProgress(data.progress);
-        setIsMonitoring(data.monitoring);
+        
+        // Use backend's monitoring flag directly
+        // Backend sets monitoring=false when workflow is completed/failed
+        console.log(`📊 Workflow status: ${data.status}, monitoring: ${data.monitoring}`);
+        setIsMonitoring(data.monitoring === true);
 
-        // Reload workflow history from database
-        if (data.jdId && data.jdTitle) {
+        // Reload workflow history from database when workflow completes
+        if ((data.status === 'completed' || data.status === 'failed') && data.jdId) {
+          console.log('✅ Workflow completed, reloading history...');
           loadWorkflowHistoryFromDB();
         }
       } else {

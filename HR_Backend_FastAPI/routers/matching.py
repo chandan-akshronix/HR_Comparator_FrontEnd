@@ -329,6 +329,7 @@ async def batch_match_resumes(  # ✅ Made async!
                 result_doc = {
                     "resume_id": crud.object_id(result["resume_id"]),
                     "jd_id": batch_request.jd_id,
+                    "workflow_id": workflow_id,  # Added workflow_id
                     "match_score": result["match_score"],
                     "fit_category": result["fit_category"],
                     "jd_extracted": result["jd_extracted"],
@@ -542,6 +543,37 @@ def get_top_matches(
                 return {}
         return {}
     
+    # Helper function to flatten skills (convert dict to list)
+    def flatten_skills(skills):
+        """Convert nested skills dict to flat list of strings"""
+        if isinstance(skills, list):
+            # Check if list contains dicts (nested structure)
+            if skills and isinstance(skills[0], dict):
+                # Flatten all dicts in the list
+                flat_skills = []
+                for item in skills:
+                    if isinstance(item, dict):
+                        for category, skill_list in item.items():
+                            if isinstance(skill_list, list):
+                                flat_skills.extend(skill_list)
+                            elif isinstance(skill_list, str):
+                                flat_skills.append(skill_list)
+                    elif isinstance(item, str):
+                        flat_skills.append(item)
+                return flat_skills
+            # Already a flat list of strings
+            return skills
+        if isinstance(skills, dict):
+            # Flatten all values from the dict
+            flat_skills = []
+            for category, skill_list in skills.items():
+                if isinstance(skill_list, list):
+                    flat_skills.extend(skill_list)
+                elif isinstance(skill_list, str):
+                    flat_skills.append(skill_list)
+            return flat_skills
+        return []
+    
     # Get workflow IDs for all resumes (batch lookup for efficiency)
     from database import WORKFLOW_EXECUTION_COLLECTION
     workflow_map = {}
@@ -576,6 +608,12 @@ def get_top_matches(
         print(f"   Career_History: {len(resume_data.get('Career_History', []))} entries")
         print(f"   Skill_Score: {match_breakdown.get('Skill_Score')}")
         
+        # Debug: Check skills format
+        tech_skills = resume_data.get("Technical_Skills")
+        print(f"   Technical_Skills type: {type(tech_skills)}")
+        if isinstance(tech_skills, dict):
+            print(f"   ⚠️ Skills is dict, will flatten: {list(tech_skills.keys())}")
+        
         # Extract current position from Career_History if available
         current_position = resume_data.get("Current_Position") or resume_data.get("current_position")
         if not current_position and resume_data.get("Career_History"):
@@ -600,7 +638,7 @@ def get_top_matches(
             "phone": resume_data.get("Mobile") or resume_data.get("phone") or "",
             "location": resume_data.get("Current_Location") or resume_data.get("location") or "",
             "total_experience": parse_experience(resume_data.get("Total_Experience_Years") or resume_data.get("total_experience")),
-            "skills_matched": resume_data.get("Technical_Skills") or resume_data.get("skills_matched") or [],
+            "skills_matched": flatten_skills(resume_data.get("Technical_Skills") or resume_data.get("skills_matched") or []),
             "match_score": result["match_score"],
             "fit_category": result["fit_category"],
             "match_breakdown": {

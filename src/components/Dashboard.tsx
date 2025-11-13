@@ -24,9 +24,15 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   // Load candidates from backend when component mounts or when switching to candidates tab
   useEffect(() => {
-    if (activeTab === 'candidates' || activeTab === 'dashboard') {
-      loadCandidatesFromBackend();
-    }
+    // Debounce: Only load if tab stays active for 200ms
+    // Prevents rapid API calls when switching tabs quickly
+    const timeout = setTimeout(() => {
+      if (activeTab === 'candidates' || activeTab === 'dashboard') {
+        loadCandidatesFromBackend();
+      }
+    }, 200);
+    
+    return () => clearTimeout(timeout);
   }, [activeTab]);
 
   const loadCandidatesFromBackend = async () => {
@@ -37,16 +43,17 @@ export function Dashboard({ onLogout }: DashboardProps) {
       const jds = await getJobDescriptions();
       
       if (jds.length > 0) {
-        // Load matches from ALL JDs, not just the first one
+        // Load matches from ALL JDs to show complete candidate pool
         const allCandidates: Candidate[] = [];
         
-        for (const jd of jds) {
+        // Process all JDs in parallel for better performance
+        const matchPromises = jds.map(async (jd) => {
           try {
             const jdId = jd.id || jd._id;
-            const matches = await getTopMatches(jdId, 50); // Increased limit to get all
+            const matches = await getTopMatches(jdId, 50);
             
             if (matches.top_matches && matches.top_matches.length > 0) {
-              const candidatesData: Candidate[] = matches.top_matches.map((match: any) => ({
+              return matches.top_matches.map((match: any) => ({
                 id: match.id,
                 name: match.candidate_name || 'Unknown',
                 title: match.current_position || 'Unknown Position',
@@ -68,14 +75,23 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 workflow_id: match.workflow_id || null,
                 jd_id: jdId // Add JD ID for reference
               } as any));
-              
-              allCandidates.push(...candidatesData);
             }
+            return [];
           } catch (jdErr) {
             console.error(`Error loading matches for JD ${jd.id}:`, jdErr);
-            // Continue with next JD even if this one fails
+            return [];
           }
-        }
+        });
+        
+        // Wait for all JD queries to complete in parallel
+        const allMatchResults = await Promise.all(matchPromises);
+        
+        // Flatten all results
+        allMatchResults.forEach(candidates => {
+          if (candidates) {
+            allCandidates.push(...candidates);
+          }
+        });
         
         // Set the first JD as selected
         setSelectedJDId(jds[0].id || jds[0]._id);
