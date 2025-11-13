@@ -306,22 +306,56 @@ async def download_resume_file(
     db: Database = Depends(get_db)
 ):
     """Download resume file from MongoDB GridFS"""
+    print(f"📥 Download request for resume: {resume_id}")
+    
+    # Debug: List all resumes to see what IDs exist
+    all_resumes = list(db["resume"].find({}, {"_id": 1, "filename": 1}).limit(10))
+    print(f"🔍 Available resumes in DB:")
+    for r in all_resumes:
+        print(f"   - {r.get('_id')} → {r.get('filename')}")
+    
     # Get resume
     resume = crud.get_resume_by_id(db, resume_id)
     if not resume:
-        raise HTTPException(status_code=404, detail="Resume not found")
+        print(f"❌ Resume not found in database: {resume_id}")
+        print(f"   Tried to find resume with ID: {resume_id}")
+        print(f"   Total resumes in DB: {db['resume'].count_documents({})}")
+        raise HTTPException(status_code=404, detail=f"Resume not found. ID: {resume_id}")
+    
+    print(f"✅ Resume found: {resume.get('filename', 'Unknown')}")
+    print(f"   Resume fields: {list(resume.keys())}")
     
     # Get GridFS file ID
     grid_file_id = resume.get("gridFsFileId")
+    print(f"   GridFS File ID: {grid_file_id}")
+    
     if not grid_file_id:
+        print(f"❌ No GridFS file ID in resume document")
+        print(f"   Available fields: {resume.keys()}")
+        
+        # Check if we have the file content directly
+        if resume.get("text"):
+            print(f"   Found text content, generating fallback text file")
+            # Generate a simple text file as fallback
+            text_content = f"Resume: {resume.get('filename', 'Unknown')}\n\n{resume.get('text', '')}"
+            return StreamingResponse(
+                io.BytesIO(text_content.encode('utf-8')),
+                media_type="text/plain",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{resume.get("filename", "resume.txt")}"'
+                }
+            )
+        
         raise HTTPException(
             status_code=404,
-            detail="File not found in storage"
+            detail="File not found in storage. Resume text only available."
         )
     
     # Download file from GridFS
     try:
+        print(f"📂 Attempting to download from GridFS: {grid_file_id}")
         file_content, filename, content_type = download_file(grid_file_id)
+        print(f"✅ File retrieved from GridFS: {filename} ({len(file_content)} bytes)")
         
         # Log download action
         crud.create_audit_log(db, {
@@ -344,6 +378,27 @@ async def download_resume_file(
         )
     
     except Exception as e:
+        print(f"❌ GridFS download error: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Fallback: Generate text file from resume text
+        print(f"⚠️ Falling back to text export")
+        if resume.get("text"):
+            filename = resume.get("filename", "resume.txt")
+            # Change extension to .txt for text export
+            if filename.endswith('.pdf') or filename.endswith('.docx'):
+                filename = filename.rsplit('.', 1)[0] + '.txt'
+            
+            text_content = f"Resume: {resume.get('filename', 'Unknown')}\n\n{resume.get('text', '')}"
+            return StreamingResponse(
+                io.BytesIO(text_content.encode('utf-8')),
+                media_type="text/plain",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"'
+                }
+            )
+        
         raise HTTPException(
             status_code=500,
             detail=f"Error downloading file: {str(e)}"

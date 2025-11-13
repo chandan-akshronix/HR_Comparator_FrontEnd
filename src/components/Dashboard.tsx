@@ -55,6 +55,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
             if (matches.top_matches && matches.top_matches.length > 0) {
               return matches.top_matches.map((match: any) => ({
                 id: match.id,
+                resume_id: match.resume_id,  // Add resume_id for file downloads
                 name: match.candidate_name || 'Unknown',
                 title: match.current_position || 'Unknown Position',
                 email: match.email || '',
