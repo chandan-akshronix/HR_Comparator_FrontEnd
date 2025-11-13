@@ -361,7 +361,7 @@ export function HomePage({ onGetStarted, onLogin }: HomePageProps) {
           </div>
           <div className="pt-8 border-t border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-4">
             <p className="text-sm text-slate-400">
-              © 2025 AgenticAI. All rights reserved.
+              © 2025 Akshronix. All rights reserved.
             </p>
             <div className="flex gap-4">
               <a href="#" className="text-slate-400 hover:text-white transition-colors">

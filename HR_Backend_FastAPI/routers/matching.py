@@ -83,14 +83,23 @@ def mock_ai_matching(resume_text: str, jd_text: str) -> dict:
         "processing_duration_ms": 2500
     }
 
-async def call_ai_agent_batch(workflow_id: str, jd_text: str, resumes: List[dict]) -> dict:
+async def call_ai_agent_batch(
+    workflow_id: str, 
+    jd_extracted: dict,
+    resumes: List[dict]
+) -> dict:
     """
-    Call AI Agent container to process multiple resumes
+    OPTIMIZED: Call AI Agent container using pre-extracted data from MongoDB
+    
+    Only runs Comparator agent (no extraction):
+    - JD data from JobDescription collection
+    - Resume data from resume collection
+    - 1 API call per resume (67% cost savings!)
     
     Args:
         workflow_id: Workflow ID (e.g. "WF-1731427200000")
-        jd_text: Full job description text
-        resumes: List of [{resume_id, resume_text}, ...]
+        jd_extracted: Pre-extracted JD data from MongoDB
+        resumes: List of [{resume_id, resume_extracted}, ...]
     
     Returns:
         {workflow_id, results: [{resume_id, match_score, ...}]}
@@ -103,20 +112,23 @@ async def call_ai_agent_batch(workflow_id: str, jd_text: str, resumes: List[dict
             "results": [
                 {
                     "resume_id": r["resume_id"],
-                    **mock_ai_matching(r["resume_text"], jd_text)
+                    **mock_ai_matching("", "")  # Mock doesn't need text
                 }
                 for r in resumes
             ]
         }
     
     try:
-        print(f"🤖 Calling AI Agent at {AI_AGENT_URL}/compare-batch")
+        print(f"⚡ Calling AI Agent (OPTIMIZED MODE) at {AI_AGENT_URL}/compare-batch")
+        print(f"   Only running Comparator agent (67% cost savings)")
+        print(f"   Skipping JD_Extractor and Resume_Extractor agents")
+        
         async with httpx.AsyncClient(timeout=AI_AGENT_TIMEOUT) as client:
             response = await client.post(
                 f"{AI_AGENT_URL}/compare-batch",
                 json={
                     "workflow_id": workflow_id,
-                    "jd_text": jd_text,
+                    "jd_extracted": jd_extracted,
                     "resumes": resumes
                 }
             )
@@ -298,24 +310,56 @@ async def batch_match_resumes(  # ✅ Made async!
     workflow_db_id = crud.create_workflow_execution(db, workflow_doc)
     
     # ============================================
-    # 🚀 CALL AI AGENT (NEW CODE)
+    # 🚀 CALL AI AGENT (OPTIMIZED - Uses Pre-Extracted Data)
     # ============================================
     try:
-        # Prepare resumes for AI Agent
+        # Prepare JD extracted data from MongoDB
+        jd_extracted = {
+            "Position": jd.get("designation", ""),
+            "Experience_Required_Years": jd.get("experience_required", ""),
+            "Must_Have_Skills": jd.get("required_skills", []),
+            "Nice_To_Have_Skills": jd.get("preferred_skills", []),
+            "Education": jd.get("education_requirement", ""),
+            "Responsibilities": jd.get("responsibilities", []),
+            "Soft_Skills": jd.get("soft_skills", []),
+            "Location": jd.get("location", ""),
+            "Industry": jd.get("industry", "")
+        }
+        
+        # Prepare resumes with pre-extracted data for AI Agent (OPTIMIZED)
         resumes_data = []
         for resume_id in resume_ids:
             resume = crud.get_resume_by_id(db, resume_id)
             if resume:
+                # Extract resume data from MongoDB (already extracted during upload)
+                resume_extracted = {
+                    "Name": resume.get("candidate_name", ""),
+                    "Email": resume.get("email", ""),
+                    "Mobile": resume.get("phone", ""),
+                    "Total_Experience_Years": str(resume.get("experience_years", 0)),
+                    "Technical_Skills": resume.get("skills", []),
+                    "Soft_Skills": resume.get("soft_skills", []),
+                    "Education": resume.get("education", ""),
+                    "Projects": resume.get("projects", []),
+                    "Certifications": resume.get("certifications", []),
+                    "Domain_Experience": resume.get("domain_experience", ""),
+                    "Current_Location": resume.get("location", ""),
+                    "Career_History": resume.get("career_history", [])
+                }
+                
                 resumes_data.append({
                     "resume_id": resume_id,
-                    "resume_text": resume.get("text", "")
+                    "resume_extracted": resume_extracted  # Pre-extracted data from MongoDB
                 })
         
-        # Call AI Agent
-        print(f"🤖 Calling AI Agent for workflow: {workflow_id}")
+        # Call AI Agent with pre-extracted data (OPTIMIZED - Comparator only)
+        print(f"⚡ Calling AI Agent (OPTIMIZED MODE) for workflow: {workflow_id}")
+        print(f"   Skipping JD_Extractor and Resume_Extractor agents")
+        print(f"   Only running Comparator agent (67% cost savings!)")
+        
         ai_results = await call_ai_agent_batch(
             workflow_id=workflow_id,
-            jd_text=jd.get("description", ""),
+            jd_extracted=jd_extracted,
             resumes=resumes_data
         )
         
