@@ -106,6 +106,65 @@ export const getResumes = async () => {
   return response.json();
 };
 
+// Download resume file
+export const downloadResume = async (resumeId: string) => {
+  const response = await fetch(`${API_BASE_URL}/files/download-resume/${resumeId}`, {
+    headers: {
+      'Authorization': `Bearer ${getAuthToken()}`
+    }
+  });
+  
+  if (!response.ok) throw new Error('Failed to download resume');
+  
+  // Get filename from Content-Disposition header or use default
+  const contentDisposition = response.headers.get('Content-Disposition');
+  let filename = 'resume.pdf';
+  if (contentDisposition) {
+    const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+    if (filenameMatch) filename = filenameMatch[1];
+  }
+  
+  // Download file
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+};
+
+// View/Preview resume file (opens in new tab)
+export const viewResume = async (resumeId: string) => {
+  const response = await fetch(`${API_BASE_URL}/files/download-resume/${resumeId}`, {
+    headers: {
+      'Authorization': `Bearer ${getAuthToken()}`
+    }
+  });
+  
+  if (!response.ok) throw new Error('Failed to load resume');
+  
+  // Get filename from Content-Disposition header
+  const contentDisposition = response.headers.get('Content-Disposition');
+  let filename = 'resume.pdf';
+  if (contentDisposition) {
+    const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+    if (filenameMatch) filename = filenameMatch[1];
+  }
+  
+  // Open file in new tab for preview
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  window.open(url, '_blank');
+  
+  // Clean up after a delay (keep URL alive for viewing)
+  setTimeout(() => {
+    window.URL.revokeObjectURL(url);
+  }, 100);
+};
+
 // Job Description APIs
 export const createJobDescription = async (jdData: {
   id: string;

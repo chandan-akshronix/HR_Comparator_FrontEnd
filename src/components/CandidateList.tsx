@@ -8,6 +8,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
+import { toast } from 'sonner';
+import { downloadResume, viewResume } from '../services/api';
 import { 
   MapPin, 
   Briefcase, 
@@ -19,7 +21,8 @@ import {
   Phone,
   ExternalLink,
   Loader2,
-  Users
+  Users,
+  Download
 } from 'lucide-react';
 import type { Candidate } from './mockData';
 
@@ -36,6 +39,61 @@ export function CandidateList({ candidates, onCandidatesUpdate, isPreview = fals
   const [sortField, setSortField] = useState<SortField>('matchScore');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [viewingResumeId, setViewingResumeId] = useState<string | null>(null);
+  
+  // Handle resume download (lazy-loaded)
+  const handleDownloadResume = async (candidate: any) => {
+    console.log('📥 Download requested for candidate:', candidate);
+    console.log('   Candidate ID:', candidate.id);
+    console.log('   Resume ID:', candidate.resume_id);
+    console.log('   All fields:', Object.keys(candidate));
+    
+    const resumeId = candidate.resume_id || (candidate as any).id;
+    if (!resumeId) {
+      console.error('❌ No resume ID found in candidate data');
+      toast.error('Resume ID not found');
+      return;
+    }
+    
+    console.log(`✅ Using resume ID: ${resumeId}`);
+    
+    setDownloadingId(candidate.id);
+    toast.info('Preparing download...');
+    
+    try {
+      await downloadResume(resumeId);
+      toast.success(`Downloaded resume for ${candidate.name}`);
+    } catch (error: any) {
+      console.error('Download error:', error);
+      toast.error('Failed to download resume: ' + error.message);
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+  
+  // Handle resume view/preview (lazy-loaded - only fetches when clicked)
+  const handleViewResume = async (candidate: any) => {
+    const resumeId = candidate.resume_id || (candidate as any).id;
+    if (!resumeId) {
+      toast.error('Resume ID not found');
+      return;
+    }
+    
+    setViewingResumeId(candidate.id);
+    toast.info('Loading resume preview...');
+    
+    try {
+      // Lazy load: Fetch and open resume only when clicked
+      await viewResume(resumeId);
+      toast.success(`Resume preview opened for ${candidate.name}`);
+    } catch (error: any) {
+      console.error('View error:', error);
+      toast.error('Failed to open resume: ' + error.message);
+    } finally {
+      setViewingResumeId(null);
+    }
+  };
   
   // Get unique workflow IDs from candidates, sorted by most recent first
   const uniqueWorkflowIds = Array.from(
@@ -366,6 +424,31 @@ export function CandidateList({ candidates, onCandidatesUpdate, isPreview = fals
                     </Badge>
                   </div>
                 </div>
+                
+                {/* Actions - Always Visible */}
+                <div className="flex flex-col gap-2 shrink-0">
+                  {!isExpanded ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setExpandedId(candidate.id)}
+                      className="text-slate-600 hover:bg-slate-100"
+                    >
+                      <ChevronDown className="w-4 h-4 mr-1" />
+                      Show Details
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setExpandedId(null)}
+                      className="text-slate-600 hover:bg-slate-100"
+                    >
+                      <ChevronUp className="w-4 h-4 mr-1" />
+                      Hide Details
+                    </Button>
+                  )}
+                </div>
               </div>
 
               {/* Expanded Details */}
@@ -405,38 +488,47 @@ export function CandidateList({ candidates, onCandidatesUpdate, isPreview = fals
                     </div>
                   </div>
 
-                  <div className="flex gap-2 pt-2">
-                    <Button size="sm" className="flex-1">
+                  {/* Action Buttons - Horizontal Layout */}
+                  <div className="flex items-center gap-2 pt-3 border-t mt-3">
+                    <Button 
+                      size="sm" 
+                      className="flex-1"
+                      onClick={() => window.location.href = `mailto:${candidate.email}`}
+                    >
                       <Mail className="w-4 h-4 mr-2" />
                       Contact
                     </Button>
-                    <Button size="sm" variant="outline" className="flex-1">
-                      <ExternalLink className="w-4 h-4 mr-2" />
-                      View Profile
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="flex-1"
+                      onClick={() => handleViewResume(candidate)}
+                      disabled={viewingResumeId === candidate.id}
+                    >
+                      {viewingResumeId === candidate.id ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <ExternalLink className="w-4 h-4 mr-2" />
+                      )}
+                      {viewingResumeId === candidate.id ? 'Loading...' : 'View Resume'}
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="flex-1"
+                      onClick={() => handleDownloadResume(candidate)}
+                      disabled={downloadingId === candidate.id}
+                    >
+                      {downloadingId === candidate.id ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <Download className="w-4 h-4 mr-2" />
+                      )}
+                      {downloadingId === candidate.id ? 'Downloading...' : 'Download'}
                     </Button>
                   </div>
                 </div>
               )}
-
-              {/* Toggle Button */}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setExpandedId(isExpanded ? null : candidate.id)}
-                className="w-full mt-3"
-              >
-                {isExpanded ? (
-                  <>
-                    <ChevronUp className="w-4 h-4 mr-2" />
-                    Show Less
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="w-4 h-4 mr-2" />
-                    Show More Details
-                  </>
-                )}
-              </Button>
             </div>
           );
         })}

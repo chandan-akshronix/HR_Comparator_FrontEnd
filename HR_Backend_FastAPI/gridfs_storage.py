@@ -48,14 +48,27 @@ def download_file(file_id: str) -> tuple[bytes, str, str]:
         Tuple of (file_content, filename, content_type)
     """
     try:
-        grid_out = fs.get(ObjectId(file_id))
+        print(f"🔍 GridFS: Converting file_id to ObjectId: {file_id}")
+        obj_id = ObjectId(file_id)
+        print(f"✅ ObjectId created: {obj_id}")
+        
+        print(f"🔍 GridFS: Fetching file from GridFS...")
+        grid_out = fs.get(obj_id)
+        print(f"✅ GridFS file found: {grid_out.filename}")
+        
+        content = grid_out.read()
+        print(f"✅ File content read: {len(content)} bytes")
+        
         return (
-            grid_out.read(),
+            content,
             grid_out.filename,
-            grid_out.content_type
+            grid_out.content_type or 'application/octet-stream'
         )
     except Exception as e:
-        raise FileNotFoundError(f"File not found: {e}")
+        print(f"❌ GridFS download failed: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise FileNotFoundError(f"File not found in GridFS: {e}")
 
 def delete_file(file_id: str) -> bool:
     """
