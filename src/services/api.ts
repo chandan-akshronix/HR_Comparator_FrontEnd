@@ -203,6 +203,8 @@ export const getJobDescriptions = async () => {
 
 // Matching APIs - Start AI Process
 export const startAIMatching = async (resumeIds: string[], jdId: string) => {
+  console.log(`📤 Sending AI matching request:`, { jdId, resumeCount: resumeIds.length });
+  
   const response = await fetch(`${API_BASE_URL}/matching/batch`, {
     method: 'POST',
     headers: {
@@ -216,8 +218,16 @@ export const startAIMatching = async (resumeIds: string[], jdId: string) => {
     })
   });
   
-  if (!response.ok) throw new Error('Matching failed');
-  return response.json();
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+    const errorMessage = errorData.detail || errorData.message || `HTTP ${response.status}: ${response.statusText}`;
+    console.error('❌ Matching API error:', errorMessage);
+    throw new Error(errorMessage);
+  }
+  
+  const result = await response.json();
+  console.log('✅ Matching API success:', result);
+  return result;
 };
 
 export const getTopMatches = async (jdId: string, limit: number = 10) => {

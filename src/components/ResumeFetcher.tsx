@@ -298,39 +298,81 @@ export function ResumeFetcher({ onFetch, onTabChange }: ResumeFetcherProps) {
         return;
       }
 
-      // Call backend - it will parse PDFs and store in MongoDB
-      const results = await processResumes(filesToProcess);
+      // Mark all as processing first
+      filesToProcess.forEach(file => {
+        setUploadedResumes(prev => prev.map(r => 
+          r.file.name === file.name
+            ? { ...r, status: 'processing' as const }
+            : r
+        ));
+      });
+
+      // Process files one by one and update status progressively
+      let successCount = 0;
+      let errorCount = 0;
       
-      // Update UI based on results
-      results.forEach((result: any) => {
-        if (result.success) {
-          setUploadedResumes(prev => prev.map(r => 
-            r.file.name === result.filename
-              ? {
-                  ...r,
-                  status: 'completed' as const,
-                  resumeId: result.resume_id,
-                  extractedData: {
-                    name: result.filename.replace(/\.[^/.]+$/, ''),
-                    skills: ['Extracted by Backend'],
-                    experience: 'Parsed from PDF'
+      for (const file of filesToProcess) {
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('source', 'direct');
+          
+          const response = await fetch(`${API_BASE_URL}/files/upload-resume`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${getAuthToken()}`
+            },
+            body: formData
+          });
+          
+          if (!response.ok) {
+            const error = await response.json();
+            setUploadedResumes(prev => prev.map(r => 
+              r.file.name === file.name
+                ? { ...r, status: 'error' as const }
+                : r
+            ));
+            errorCount++;
+            toast.error(`Failed: ${file.name}`);
+          } else {
+            const data = await response.json();
+            // Update status to completed immediately after processing
+            setUploadedResumes(prev => prev.map(r => 
+              r.file.name === file.name
+                ? {
+                    ...r,
+                    status: 'completed' as const,
+                    resumeId: data.resume_id,
+                    extractedData: {
+                      name: file.name.replace(/\.[^/.]+$/, ''),
+                      skills: ['Extracted by Backend'],
+                      experience: 'Parsed from PDF'
+                    }
                   }
-                }
-              : r
-          ));
-        } else {
+                : r
+            ));
+            successCount++;
+          }
+        } catch (err: any) {
+          console.error(`Error processing ${file.name}:`, err);
           setUploadedResumes(prev => prev.map(r => 
-            r.file.name === result.filename
+            r.file.name === file.name
               ? { ...r, status: 'error' as const }
               : r
           ));
-          toast.error(`Failed: ${result.filename}`);
+          errorCount++;
+          toast.error(`Error processing ${file.name}`);
         }
-      });
+      }
       
-      // Get updated stats
+      // Get updated stats and show summary
       const stats = await getUserStats();
-      toast.success(`Resumes processed! ${stats.remaining} uploads remaining.`);
+      if (successCount > 0) {
+        toast.success(`${successCount} resume(s) processed successfully!`);
+      }
+      if (errorCount > 0) {
+        toast.error(`${errorCount} resume(s) failed to process.`);
+      }
       
     } catch (err: any) {
       console.error('Processing error:', err);
@@ -369,9 +411,17 @@ export function ResumeFetcher({ onFetch, onTabChange }: ResumeFetcherProps) {
       return;
     }
 
-    const allResumesProcessed = uploadedResumes.every(r => r.status === 'completed');
-    if (!allResumesProcessed) {
-      toast.error('Please process all resumes before starting AI workflow');
+    // Check if there are any pending or processing resumes
+    const hasPendingOrProcessing = uploadedResumes.some(r => r.status === 'pending' || r.status === 'processing');
+    if (hasPendingOrProcessing) {
+      toast.error('Please wait for all resumes to finish processing before starting AI workflow');
+      return;
+    }
+    
+    // Check if there's at least one completed resume
+    const hasCompletedResumes = uploadedResumes.some(r => r.status === 'completed');
+    if (!hasCompletedResumes) {
+      toast.error('Please process at least one resume successfully before starting AI workflow');
       return;
     }
 
@@ -383,22 +433,44 @@ export function ResumeFetcher({ onFetch, onTabChange }: ResumeFetcherProps) {
         .filter(r => r.status === 'completed' && r.resumeId)
         .map(r => r.resumeId!);
       
+      if (resumeIds.length === 0) {
+        toast.error('No valid resume IDs found. Please ensure resumes are processed successfully.');
+        setIsStartingAI(false);
+        return;
+      }
+      
       const selectedJDData = jobDescriptions.find(jd => jd.id === selectedJD);
       
+      if (!selectedJDData?.id) {
+        toast.error('Job description not found. Please select a valid job description.');
+        setIsStartingAI(false);
+        return;
+      }
+      
+      console.log(`🚀 Starting AI matching with ${resumeIds.length} resumes for JD: ${selectedJDData.id}`);
+      console.log(`📋 Resume IDs:`, resumeIds.slice(0, 5), resumeIds.length > 5 ? `... and ${resumeIds.length - 5} more` : '');
+      
       // Show success message and redirect immediately
-      toast.success('AI processing started! Watch the agents work in real-time.');
+      toast.success(`AI processing started with ${resumeIds.length} resumes! Watch the agents work in real-time.`);
       
       // Navigate to AI Workflow tab IMMEDIATELY so user can watch progress
       onTabChange('workflow');
       
       // Start AI matching in background (don't await - let it process)
-      startAIMatching(resumeIds, selectedJDData?.id || selectedJD)
+      startAIMatching(resumeIds, selectedJDData.id)
         .then(result => {
-          console.log('AI matching completed:', result);
+          console.log('✅ AI matching completed:', result);
+          toast.success('AI processing completed successfully!');
         })
         .catch(err => {
-          console.error('AI matching error:', err);
-          // Don't show toast here - user is already on workflow tab
+          console.error('❌ AI matching error:', err);
+          console.error('❌ Error details:', {
+            message: err.message,
+            stack: err.stack,
+            resumeCount: resumeIds.length,
+            jdId: selectedJDData.id
+          });
+          toast.error(`AI processing failed: ${err.message || 'Unknown error'}. Check browser console for details.`);
         })
         .finally(() => {
           setIsStartingAI(false);
@@ -411,7 +483,11 @@ export function ResumeFetcher({ onFetch, onTabChange }: ResumeFetcherProps) {
   };
 
   // Helper to check if ready for AI processing
-  const isReadyForAI = selectedJD && uploadedResumes.length > 0 && uploadedResumes.every(r => r.status === 'completed');
+  // Ready for AI if: JD selected, has resumes, and all resumes are either completed or error (no pending/processing)
+  const isReadyForAI = selectedJD && 
+    uploadedResumes.length > 0 && 
+    uploadedResumes.some(r => r.status === 'completed') && // At least one completed resume
+    uploadedResumes.every(r => r.status === 'completed' || r.status === 'error'); // All are done (completed or failed)
 
   return (
     <Tabs defaultValue="upload" className="space-y-6">
@@ -572,7 +648,7 @@ export function ResumeFetcher({ onFetch, onTabChange }: ResumeFetcherProps) {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label htmlFor="resume-upload">Select Resume Files</Label>
-                    <Badge variant={uploadedResumes.length >= FREE_PLAN_LIMIT && !isPremium ? "destructive" : "outline"} className="text-xs">
+                    <Badge variant={uploadedResumes.length > FREE_PLAN_LIMIT && !isPremium ? "destructive" : "outline"} className="text-xs">
                       {uploadedResumes.length}/{isPremium ? '∞' : FREE_PLAN_LIMIT}
                     </Badge>
                   </div>
@@ -582,13 +658,13 @@ export function ResumeFetcher({ onFetch, onTabChange }: ResumeFetcherProps) {
                     accept=".pdf,.doc,.docx"
                     multiple
                     onChange={handleResumeUpload}
-                    disabled={uploadedResumes.length >= FREE_PLAN_LIMIT && !isPremium}
+                    disabled={uploadedResumes.length > FREE_PLAN_LIMIT && !isPremium}
                   />
                   <div className="flex items-center justify-between text-xs">
                     <p className="text-muted-foreground">
                       Supported formats: PDF, DOC, DOCX. You can select multiple files.
                     </p>
-                    {!isPremium && uploadedResumes.length >= FREE_PLAN_LIMIT && (
+                    {!isPremium && uploadedResumes.length > FREE_PLAN_LIMIT && (
                       <Button
                         variant="link"
                         size="sm"
@@ -601,7 +677,7 @@ export function ResumeFetcher({ onFetch, onTabChange }: ResumeFetcherProps) {
                   </div>
                   
                   {/* Free Plan Limit Warning */}
-                  {!isPremium && uploadedResumes.length >= FREE_PLAN_LIMIT - 2 && uploadedResumes.length < FREE_PLAN_LIMIT && (
+                  {!isPremium && uploadedResumes.length >= FREE_PLAN_LIMIT - 2 && uploadedResumes.length <= FREE_PLAN_LIMIT && (
                     <div className="flex items-start gap-2 p-3 bg-orange-50 border border-orange-200 rounded-lg">
                       <AlertCircle className="w-4 h-4 text-orange-600 mt-0.5 shrink-0" />
                       <div className="text-xs text-orange-800">
@@ -688,39 +764,6 @@ export function ResumeFetcher({ onFetch, onTabChange }: ResumeFetcherProps) {
               </CardContent>
             </Card>
 
-            {/* Processing Results */}
-            {uploadedResumes.some(r => r.status === 'completed') && (
-              <Card className="bg-green-50 border-green-200">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-green-600" />
-                    Processing Complete
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {uploadedResumes.filter(r => r.status === 'completed').map((resume) => (
-                      <div key={resume.id} className="bg-white rounded-lg p-3 border border-green-200">
-                        <p className="text-sm mb-2">{resume.extractedData?.name}</p>
-                        <div className="flex gap-2 flex-wrap">
-                          {resume.extractedData?.skills.map((skill, i) => (
-                            <Badge key={i} variant="secondary" className="text-xs">
-                              {skill}
-                            </Badge>
-                          ))}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-2">
-                          Experience: {resume.extractedData?.experience}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                  <Button variant="outline" className="w-full mt-4" onClick={() => onTabChange('candidates')}>
-                    View in Candidates Tab
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
           </div>
         </div>
 
@@ -768,10 +811,16 @@ export function ResumeFetcher({ onFetch, onTabChange }: ResumeFetcherProps) {
                       Please select a job description
                     </div>
                   )}
-                  {uploadedResumes.some(r => r.status !== 'completed') && (
+                  {uploadedResumes.some(r => r.status === 'pending' || r.status === 'processing') && (
                     <div className="flex items-center gap-2 text-sm text-orange-600">
                       <AlertCircle className="w-4 h-4" />
-                      Please process all resumes before starting AI workflow
+                      Please wait for all resumes to finish processing
+                    </div>
+                  )}
+                  {!uploadedResumes.some(r => r.status === 'completed') && uploadedResumes.length > 0 && (
+                    <div className="flex items-center gap-2 text-sm text-orange-600">
+                      <AlertCircle className="w-4 h-4" />
+                      Please process at least one resume successfully
                     </div>
                   )}
                 </div>

@@ -226,9 +226,9 @@ export function AIWorkflow() {
           };
           output = {
             resultsGenerated: historyEntry.totalCandidates || 0,
-            bestFit: Math.floor((historyEntry.metrics?.topMatches || 0) * 0.5),
-            partialFit: Math.floor((historyEntry.metrics?.topMatches || 0) * 0.3),
-            notFit: historyEntry.totalCandidates - (historyEntry.metrics?.topMatches || 0)
+            bestFit: historyEntry.metrics?.bestFit ?? Math.floor((historyEntry.metrics?.topMatches || 0) * 0.5),
+            partialFit: historyEntry.metrics?.partialFit ?? Math.floor((historyEntry.metrics?.topMatches || 0) * 0.3),
+            notFit: historyEntry.metrics?.notFit ?? Math.max(0, (historyEntry.totalCandidates || 0) - (historyEntry.metrics?.topMatches || 0))
           };
         }
         
@@ -296,19 +296,33 @@ export function AIWorkflow() {
         }
         
         // Map backend agents to frontend format
-        const mappedAgents: AgentStep[] = data.agents.map((agent: any) => ({
-          id: agent.id,
-          name: agent.name,
-          status: agent.status as AgentStatus,
-          icon: getIconForAgent(agent.id),
-          timestamp: agent.timestamp,
-          duration: agent.duration,
-          description: agent.description,
-          confidence: agent.confidence,
-          inputData: agent.metrics,
-          analysis: agent.metrics,
-          output: agent.metrics
-        }));
+        const mappedAgents: AgentStep[] = data.agents.map((agent: any) => {
+          // For HR Comparator agent, use only output-specific fields (not all metrics)
+          let output = agent.metrics;
+          if (agent.id === 'hr-comparator' && data.metrics) {
+            // Only include output fields, not all metrics
+            output = {
+              resultsGenerated: data.metrics.totalCandidates || 0,
+              bestFit: data.metrics.bestFit ?? 0,
+              partialFit: data.metrics.partialFit ?? 0,
+              notFit: data.metrics.notFit ?? 0
+            };
+          }
+          
+          return {
+            id: agent.id,
+            name: agent.name,
+            status: agent.status as AgentStatus,
+            icon: getIconForAgent(agent.id),
+            timestamp: agent.timestamp,
+            duration: agent.duration,
+            description: agent.description,
+            confidence: agent.confidence,
+            inputData: agent.metrics,
+            analysis: agent.metrics,
+            output: output
+          };
+        });
         
         setAgents(mappedAgents);
         setMetrics(data.metrics);
@@ -431,7 +445,7 @@ export function AIWorkflow() {
                   {selectedHistoryId === 'current' 
                     ? (isMonitoring ? 'Live monitoring active' : 'Monitoring paused')
                     : 'Viewing saved workflow'}
-                  {' • '}{completedAgents} of {totalAgents} steps completed (1 AI Agent)
+                  {' • '}{completedAgents} of {totalAgents} steps completed
                 </div>
               </div>
             </div>
@@ -606,7 +620,7 @@ export function AIWorkflow() {
               Workflow Pipeline
             </h3>
             <Badge variant="outline" className="text-xs">
-              {completedAgents}/{totalAgents} Complete • 1 AI Agent
+              {completedAgents}/{totalAgents} Complete
             </Badge>
           </div>
         </div>

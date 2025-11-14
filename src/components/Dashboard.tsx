@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from './ui/button';
 import { LogOut, Upload, Search, FileText, Users } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -9,7 +9,7 @@ import { CandidateList } from './CandidateList';
 import { AIWorkflow } from './AIWorkflow';
 import { DashboardOverview } from './DashboardOverview';
 import { type Candidate } from './mockData';
-import { getTopMatches, getJobDescriptions } from '../services/api';
+import { getTopMatches, getJobDescriptions, getWorkflowStatus } from '../services/api';
 
 interface DashboardProps {
   onLogout: () => void;
@@ -21,26 +21,15 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [loading, setLoading] = useState(false);
   const [selectedJDId, setSelectedJDId] = useState<string | null>(null);
+  const [jobDescriptions, setJobDescriptions] = useState<Array<{ id?: string; _id?: string; designation?: string; title?: string }>>([]);
 
-  // Load candidates from backend when component mounts or when switching to candidates tab
-  useEffect(() => {
-    // Debounce: Only load if tab stays active for 200ms
-    // Prevents rapid API calls when switching tabs quickly
-    const timeout = setTimeout(() => {
-      if (activeTab === 'candidates' || activeTab === 'dashboard') {
-        loadCandidatesFromBackend();
-      }
-    }, 200);
-    
-    return () => clearTimeout(timeout);
-  }, [activeTab]);
-
-  const loadCandidatesFromBackend = async () => {
+  const loadCandidatesFromBackend = useCallback(async () => {
     try {
       setLoading(true);
       
       // Load job descriptions
       const jds = await getJobDescriptions();
+      setJobDescriptions(jds); // Store for use in CandidateList
       
       if (jds.length > 0) {
         // Load matches from ALL JDs to show complete candidate pool
@@ -50,7 +39,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
         const matchPromises = jds.map(async (jd) => {
           try {
             const jdId = jd.id || jd._id;
-            const matches = await getTopMatches(jdId, 50);
+            // Request all matches (no limit, backend will return up to 500)
+            const matches = await getTopMatches(jdId, 500);
             
             if (matches.top_matches && matches.top_matches.length > 0) {
               return matches.top_matches.map((match: any) => ({
@@ -113,7 +103,109 @@ export function Dashboard({ onLogout }: DashboardProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Load candidates from backend when component mounts or when switching to candidates tab
+  useEffect(() => {
+    // Debounce: Only load if tab stays active for 200ms
+    // Prevents rapid API calls when switching tabs quickly
+    const timeout = setTimeout(() => {
+      if (activeTab === 'candidates' || activeTab === 'dashboard') {
+        loadCandidatesFromBackend();
+      }
+    }, 200);
+    
+    return () => clearTimeout(timeout);
+  }, [activeTab, loadCandidatesFromBackend]);
+
+  // Track last known candidate count and workflow ID for detecting new results
+  const lastCandidateCountRef = useRef<number>(0);
+  const lastWorkflowIdRef = useRef<string | null>(null);
+
+  // Auto-refresh candidates when workflow is in progress (live results)
+  useEffect(() => {
+    let intervalId: number | null = null;
+    
+    const checkWorkflowAndRefresh = async () => {
+      try {
+        const workflowStatus = await getWorkflowStatus();
+        const currentWorkflowId = workflowStatus.workflowId || null;
+        
+        // Reset counter if this is a new workflow
+        if (currentWorkflowId && currentWorkflowId !== lastWorkflowIdRef.current) {
+          console.log('🆕 New workflow detected, resetting candidate count tracker', {
+            oldWorkflowId: lastWorkflowIdRef.current,
+            newWorkflowId: currentWorkflowId
+          });
+          lastCandidateCountRef.current = 0;
+          lastWorkflowIdRef.current = currentWorkflowId;
+        }
+        
+        console.log('📊 Workflow status check:', {
+          success: workflowStatus.success,
+          status: workflowStatus.status,
+          monitoring: workflowStatus.monitoring,
+          workflowId: currentWorkflowId,
+          topMatches: workflowStatus.metrics?.topMatches,
+          currentCandidates: candidates.length
+        });
+        
+        // Always refresh candidates if workflow is active (in_progress, pending, or monitoring)
+        // This ensures we get live updates as candidates are processed
+        const isWorkflowActive = workflowStatus.success && (
+          workflowStatus.status === 'in_progress' || 
+          workflowStatus.status === 'pending' ||
+          workflowStatus.monitoring === true
+        );
+        
+        const currentMatches = workflowStatus.metrics?.topMatches || 0;
+        const hasNewMatches = currentMatches > lastCandidateCountRef.current;
+        const hasMoreInBackend = currentMatches > candidates.length;
+        
+        // Refresh if workflow is active OR we detect new matches
+        const shouldRefresh = isWorkflowActive || hasNewMatches || hasMoreInBackend;
+        
+        if (shouldRefresh && (activeTab === 'candidates' || activeTab === 'dashboard')) {
+          console.log('🔄 Refreshing candidates for live results...', {
+            status: workflowStatus.status,
+            monitoring: workflowStatus.monitoring,
+            backendMatches: currentMatches,
+            displayedCandidates: candidates.length,
+            previousCount: lastCandidateCountRef.current,
+            reason: isWorkflowActive ? 'workflow active' : hasNewMatches ? 'new matches detected' : 'backend has more candidates'
+          });
+          await loadCandidatesFromBackend();
+          // Update last known count
+          if (currentMatches > 0) {
+            lastCandidateCountRef.current = currentMatches;
+          }
+        } else if (isWorkflowActive) {
+          console.log('⏸️ Workflow active but not refreshing (already up to date or wrong tab)', {
+            activeTab,
+            backendMatches: currentMatches,
+            displayedCandidates: candidates.length
+          });
+        }
+      } catch (err) {
+        // Log error but don't spam console
+        console.debug('Workflow status check failed:', err);
+      }
+    };
+    
+    // Check workflow status every 3 seconds when on relevant tabs (more frequent for live updates)
+    if (activeTab === 'candidates' || activeTab === 'dashboard') {
+      // Initial check
+      checkWorkflowAndRefresh();
+      // Then poll every 3 seconds for more responsive updates
+      intervalId = setInterval(checkWorkflowAndRefresh, 3000);
+    }
+    
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [activeTab, loadCandidatesFromBackend]);
 
   const handleJobDescriptionUpload = (description: string) => {
     setJobDescription(description);
@@ -199,6 +291,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
                   onCandidatesUpdate={setCandidates}
                   isPreview={false}
                   isLoading={loading}
+                  jobDescriptions={jobDescriptions}
                 />
               </CardContent>
             </Card>

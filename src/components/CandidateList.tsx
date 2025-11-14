@@ -31,11 +31,12 @@ interface CandidateListProps {
   onCandidatesUpdate: (candidates: Candidate[]) => void;
   isPreview?: boolean;
   isLoading?: boolean;
+  jobDescriptions?: Array<{ id?: string; _id?: string; designation?: string; title?: string }>;
 }
 
 type SortField = 'matchScore' | 'experience' | 'skills' | 'locality' | 'stability';
 
-export function CandidateList({ candidates, onCandidatesUpdate, isPreview = false, isLoading = false }: CandidateListProps) {
+export function CandidateList({ candidates, onCandidatesUpdate, isPreview = false, isLoading = false, jobDescriptions = [] }: CandidateListProps) {
   const [sortField, setSortField] = useState<SortField>('matchScore');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -200,10 +201,15 @@ export function CandidateList({ candidates, onCandidatesUpdate, isPreview = fals
             {/* Workflow Filter */}
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">Workflow:</span>
-              <Select value={selectedWorkflowId} onValueChange={setSelectedWorkflowId}>
+              <Select value={selectedWorkflowId} onValueChange={setSelectedWorkflowId} disabled={isLoading}>
                 <SelectTrigger className="w-[280px]">
                   <SelectValue>
-                    {selectedWorkflowId === 'all' ? (
+                    {isLoading ? (
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Loading...</span>
+                      </div>
+                    ) : selectedWorkflowId === 'all' ? (
                       <span>All Workflows <span className="text-slate-500">({candidates.length})</span></span>
                     ) : (
                       <span>
@@ -251,9 +257,25 @@ export function CandidateList({ candidates, onCandidatesUpdate, isPreview = fals
             {/* Job Title Filter */}
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">Job Title:</span>
-              <Select value={selectedJDId} onValueChange={setSelectedJDId}>
+              <Select value={selectedJDId} onValueChange={setSelectedJDId} disabled={isLoading}>
                 <SelectTrigger className="w-[200px]">
-                  <SelectValue />
+                  <SelectValue>
+                    {isLoading ? (
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Loading...</span>
+                      </div>
+                    ) : selectedJDId === 'all' ? (
+                      `All Jobs (${candidates.length})`
+                    ) : (
+                      (() => {
+                        const jd = jobDescriptions.find(j => (j.id || j._id) === selectedJDId);
+                        const title = jd?.designation || jd?.title || selectedJDId;
+                        const count = candidates.filter((c: any) => c.jd_id === selectedJDId).length;
+                        return `${title} (${count})`;
+                      })()
+                    )}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">
@@ -261,9 +283,11 @@ export function CandidateList({ candidates, onCandidatesUpdate, isPreview = fals
                   </SelectItem>
                   {uniqueJDIds.map((jdId) => {
                     const count = candidates.filter((c: any) => c.jd_id === jdId).length;
+                    const jd = jobDescriptions.find(j => (j.id || j._id) === jdId);
+                    const title = jd?.designation || jd?.title || jdId;
                     return (
                       <SelectItem key={jdId} value={jdId}>
-                        {jdId} ({count} candidates)
+                        {title} ({count} candidates)
                       </SelectItem>
                     );
                   })}
