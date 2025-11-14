@@ -40,10 +40,17 @@ app = FastAPI(
 )
 
 # CORS Configuration
+# CORS Configuration - Enhanced with better debugging
 cors_origins = os.getenv(
     "CORS_ORIGINS",
-    "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173"
+    "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://20.84.240.24:3000,http://20.84.240.24"
 ).split(",")
+
+# Clean up origins (remove empty strings and whitespace)
+cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
+
+# Print for debugging - helps verify CORS is configured correctly
+print(f"🔒 CORS enabled for origins: {cors_origins}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,6 +58,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]  # Important for some headers to be accessible
 )
 
 # Include routers
