@@ -16,7 +16,9 @@ export interface Candidate {
     experience: number;
     location: number;
     stability: number;
+    overqualified: number;
   };
+  selectionReason?: string; // AI-generated recommendation text
 }
 
 export const mockCandidates: Candidate[] = [
@@ -38,6 +40,7 @@ export const mockCandidates: Candidate[] = [
       experience: 90,
       location: 100,
       stability: 85,
+      overqualified: 0,
     },
   },
   {
@@ -58,6 +61,7 @@ export const mockCandidates: Candidate[] = [
       experience: 75,
       location: 70,
       stability: 72,
+      overqualified: 0,
     },
   },
   {
@@ -78,6 +82,7 @@ export const mockCandidates: Candidate[] = [
       experience: 83,
       location: 85,
       stability: 90,
+      overqualified: 0,
     },
   },
   {
@@ -98,6 +103,7 @@ export const mockCandidates: Candidate[] = [
       experience: 92,
       location: 80,
       stability: 88,
+      overqualified: 15,
     },
   },
   {
@@ -118,6 +124,7 @@ export const mockCandidates: Candidate[] = [
       experience: 65,
       location: 85,
       stability: 65,
+      overqualified: 0,
     },
   },
   {
@@ -138,6 +145,7 @@ export const mockCandidates: Candidate[] = [
       experience: 95,
       location: 90,
       stability: 92,
+      overqualified: 25,
     },
   },
   {
@@ -158,6 +166,7 @@ export const mockCandidates: Candidate[] = [
       experience: 70,
       location: 75,
       stability: 78,
+      overqualified: 0,
     },
   },
   {
@@ -178,6 +187,7 @@ export const mockCandidates: Candidate[] = [
       experience: 80,
       location: 82,
       stability: 80,
+      overqualified: 0,
     },
   },
 ];

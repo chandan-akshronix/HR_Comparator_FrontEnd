@@ -34,7 +34,7 @@ interface CandidateListProps {
   jobDescriptions?: Array<{ id?: string; _id?: string; designation?: string; title?: string }>;
 }
 
-type SortField = 'matchScore' | 'experience' | 'skills' | 'locality' | 'stability';
+type SortField = 'matchScore' | 'experience' | 'skills' | 'locality' | 'stability' | 'overqualified';
 
 export function CandidateList({ candidates, onCandidatesUpdate, isPreview = false, isLoading = false, jobDescriptions = [] }: CandidateListProps) {
   const [sortField, setSortField] = useState<SortField>('matchScore');
@@ -173,6 +173,9 @@ export function CandidateList({ candidates, onCandidatesUpdate, isPreview = fals
         break;
       case 'stability':
         compareValue = a.stabilityScore - b.stabilityScore;
+        break;
+      case 'overqualified':
+        compareValue = (a.matchBreakdown?.overqualified || 0) - (b.matchBreakdown?.overqualified || 0);
         break;
     }
     
@@ -327,6 +330,7 @@ export function CandidateList({ candidates, onCandidatesUpdate, isPreview = fals
                   <SelectItem value="skills">Skills Count</SelectItem>
                   <SelectItem value="locality">Location</SelectItem>
                   <SelectItem value="stability">Stability</SelectItem>
+                  <SelectItem value="overqualified">Overqualified</SelectItem>
                 </SelectContent>
               </Select>
             <Button
@@ -438,7 +442,7 @@ export function CandidateList({ candidates, onCandidatesUpdate, isPreview = fals
                   </div>
 
                   {/* Source */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 mb-3">
                     <span className="text-xs text-muted-foreground">Source:</span>
                     <Badge variant="outline" className="text-xs">
                       {candidate.source}
@@ -447,6 +451,16 @@ export function CandidateList({ candidates, onCandidatesUpdate, isPreview = fals
                       {stability.label}
                     </Badge>
                   </div>
+
+                  {/* Selection Reason Preview (Collapsed View) */}
+                  {!isExpanded && (candidate as any).selectionReason && (
+                    <div className="mt-2 pt-3 border-t border-slate-200">
+                      <div className="text-xs font-semibold text-slate-600 mb-1">AI Recommendation:</div>
+                      <div className="text-xs text-slate-600 line-clamp-2">
+                        {(candidate as any).selectionReason}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 
                 {/* Actions - Always Visible */}
@@ -511,6 +525,16 @@ export function CandidateList({ candidates, onCandidatesUpdate, isPreview = fals
                       ))}
                     </div>
                   </div>
+
+                  {/* Selection Reason */}
+                  {(candidate as any).selectionReason && (
+                    <div>
+                      <h4 className="text-sm mb-2 font-semibold">AI Recommendation</h4>
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-slate-700 whitespace-pre-line">
+                        {(candidate as any).selectionReason}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Action Buttons - Horizontal Layout */}
                   <div className="flex items-center gap-2 pt-3 border-t mt-3">

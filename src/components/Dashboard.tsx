@@ -19,15 +19,21 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [jobDescription, setJobDescription] = useState<string>('');
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // Start with true to show skeleton immediately
   const [selectedJDId, setSelectedJDId] = useState<string | null>(null);
   const [jobDescriptions, setJobDescriptions] = useState<Array<{ id?: string; _id?: string; designation?: string; title?: string }>>([]);
+  const [dataLoaded, setDataLoaded] = useState(false); // Track if data has been loaded
 
-  const loadCandidatesFromBackend = useCallback(async () => {
+  const loadCandidatesFromBackend = useCallback(async (forceReload = false) => {
+    // Skip if data already loaded and not forcing reload
+    if (dataLoaded && !forceReload) {
+      return;
+    }
+    
     try {
       setLoading(true);
       
-      // Load job descriptions
+      // Load job descriptions (cached by browser, but we still need fresh data)
       const jds = await getJobDescriptions();
       setJobDescriptions(jds); // Store for use in CandidateList
       
@@ -36,11 +42,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
         const allCandidates: Candidate[] = [];
         
         // Process all JDs in parallel for better performance
+        // Reduced limit to 200 per JD for faster loading (can be increased if needed)
         const matchPromises = jds.map(async (jd) => {
           try {
             const jdId = jd.id || jd._id;
-            // Request all matches (no limit, backend will return up to 500)
-            const matches = await getTopMatches(jdId, 500);
+            // Request matches with reasonable limit for faster loading
+            const matches = await getTopMatches(jdId, 200);
             
             if (matches.top_matches && matches.top_matches.length > 0) {
               return matches.top_matches.map((match: any) => ({
@@ -62,7 +69,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
                   experience: Math.round(match.match_breakdown?.experience_match || 0),
                   location: Math.round(match.match_breakdown?.location_match || 0),
                   stability: Math.round(match.match_breakdown?.stability || 0),
+                  overqualified: Math.round(match.match_breakdown?.overqualified || 0),
                 },
+                selectionReason: match.selection_reason || '', // Add selection reason
                 workflow_id: match.workflow_id || null,
                 jd_id: jdId // Add JD ID for reference
               } as any));
@@ -93,25 +102,83 @@ export function Dashboard({ onLogout }: DashboardProps) {
         );
         
         setCandidates(uniqueCandidates);
+        setDataLoaded(true); // Mark data as loaded
       } else {
         // No JDs yet - show empty state
         setCandidates([]);
+        setDataLoaded(true);
       }
     } catch (err) {
       console.error('Error loading candidates:', err);
       setCandidates([]);
+      setDataLoaded(true); // Mark as loaded even on error to prevent infinite retries
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [dataLoaded]);
 
-  // Load candidates from backend when component mounts or when switching to candidates tab
+  // Track if we've already loaded data for the current tab to prevent infinite loops
+  const lastLoadedTabRef = useRef<string | null>(null);
+  const candidatesCountRef = useRef<number>(0);
+  
+  // Update ref when candidates change (without triggering effect)
   useEffect(() => {
+    candidatesCountRef.current = candidates.length;
+  }, [candidates.length]);
+  
+  // Load candidates from backend when component mounts or when switching to candidates/dashboard tab
+  // This refreshes data ONCE when switching tabs (no continuous polling)
+  useEffect(() => {
+    // Reset tab tracking when switching to a different tab (allows refresh between dashboard/candidates)
+    const previousTab = lastLoadedTabRef.current;
+    if (previousTab && previousTab !== activeTab) {
+      lastLoadedTabRef.current = null; // Reset to allow refresh on new tab
+    }
+    
+    // Skip if we just loaded for this same tab (prevents duplicate loads)
+    if (lastLoadedTabRef.current === activeTab) {
+      return;
+    }
+    
     // Debounce: Only load if tab stays active for 200ms
     // Prevents rapid API calls when switching tabs quickly
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
       if (activeTab === 'candidates' || activeTab === 'dashboard') {
-        loadCandidatesFromBackend();
+        // Always refresh when switching to these tabs to get latest data
+        // Check workflow status to determine if we should force reload
+        try {
+          const workflowStatus = await getWorkflowStatus();
+          const isCompleted = workflowStatus.status === 'completed';
+          const backendMatches = workflowStatus.metrics?.topMatches || 0;
+          const hasMatches = backendMatches > 0;
+          
+          // Force reload if:
+          // 1. No candidates displayed but backend has matches
+          // 2. Backend has more matches than what's displayed
+          // 3. Workflow is completed (always refresh to get latest data)
+          const candidateCount = candidatesCountRef.current;
+          const shouldForce = hasMatches && (
+            candidateCount === 0 || 
+            backendMatches > candidateCount ||
+            isCompleted
+          );
+          
+          console.log('🔄 Tab switch - refreshing data:', {
+            tab: activeTab,
+            isCompleted,
+            backendMatches,
+            displayedCandidates: candidateCount,
+            shouldForce
+          });
+          
+          await loadCandidatesFromBackend(shouldForce);
+          lastLoadedTabRef.current = activeTab;
+        } catch (err) {
+          // If workflow status check fails, just do a normal load
+          console.error('Error checking workflow status on tab switch:', err);
+          await loadCandidatesFromBackend(true); // Force reload on tab switch
+          lastLoadedTabRef.current = activeTab;
+        }
       }
     }, 200);
     
@@ -122,11 +189,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const lastCandidateCountRef = useRef<number>(0);
   const lastWorkflowIdRef = useRef<string | null>(null);
 
-  // Auto-refresh candidates when workflow is in progress (live results)
+  // Check for new workflow when component mounts or tab changes (one-time check, no polling)
   useEffect(() => {
-    let intervalId: number | null = null;
-    
-    const checkWorkflowAndRefresh = async () => {
+    const checkForNewWorkflow = async () => {
       try {
         const workflowStatus = await getWorkflowStatus();
         const currentWorkflowId = workflowStatus.workflowId || null;
@@ -139,73 +204,19 @@ export function Dashboard({ onLogout }: DashboardProps) {
           });
           lastCandidateCountRef.current = 0;
           lastWorkflowIdRef.current = currentWorkflowId;
-        }
-        
-        console.log('📊 Workflow status check:', {
-          success: workflowStatus.success,
-          status: workflowStatus.status,
-          monitoring: workflowStatus.monitoring,
-          workflowId: currentWorkflowId,
-          topMatches: workflowStatus.metrics?.topMatches,
-          currentCandidates: candidates.length
-        });
-        
-        // Always refresh candidates if workflow is active (in_progress, pending, or monitoring)
-        // This ensures we get live updates as candidates are processed
-        const isWorkflowActive = workflowStatus.success && (
-          workflowStatus.status === 'in_progress' || 
-          workflowStatus.status === 'pending' ||
-          workflowStatus.monitoring === true
-        );
-        
-        const currentMatches = workflowStatus.metrics?.topMatches || 0;
-        const hasNewMatches = currentMatches > lastCandidateCountRef.current;
-        const hasMoreInBackend = currentMatches > candidates.length;
-        
-        // Refresh if workflow is active OR we detect new matches
-        const shouldRefresh = isWorkflowActive || hasNewMatches || hasMoreInBackend;
-        
-        if (shouldRefresh && (activeTab === 'candidates' || activeTab === 'dashboard')) {
-          console.log('🔄 Refreshing candidates for live results...', {
-            status: workflowStatus.status,
-            monitoring: workflowStatus.monitoring,
-            backendMatches: currentMatches,
-            displayedCandidates: candidates.length,
-            previousCount: lastCandidateCountRef.current,
-            reason: isWorkflowActive ? 'workflow active' : hasNewMatches ? 'new matches detected' : 'backend has more candidates'
-          });
-          await loadCandidatesFromBackend();
-          // Update last known count
-          if (currentMatches > 0) {
-            lastCandidateCountRef.current = currentMatches;
-          }
-        } else if (isWorkflowActive) {
-          console.log('⏸️ Workflow active but not refreshing (already up to date or wrong tab)', {
-            activeTab,
-            backendMatches: currentMatches,
-            displayedCandidates: candidates.length
-          });
+          // Reset dataLoaded flag for new workflow to ensure fresh data loads
+          setDataLoaded(false);
         }
       } catch (err) {
-        // Log error but don't spam console
         console.debug('Workflow status check failed:', err);
       }
     };
     
-    // Check workflow status every 3 seconds when on relevant tabs (more frequent for live updates)
+    // Only check once when tab changes or component mounts (no polling)
     if (activeTab === 'candidates' || activeTab === 'dashboard') {
-      // Initial check
-      checkWorkflowAndRefresh();
-      // Then poll every 3 seconds for more responsive updates
-      intervalId = setInterval(checkWorkflowAndRefresh, 3000);
+      checkForNewWorkflow();
     }
-    
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [activeTab, loadCandidatesFromBackend]);
+  }, [activeTab]);
 
   const handleJobDescriptionUpload = (description: string) => {
     setJobDescription(description);
@@ -216,8 +227,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   const handleResumeFetch = (source: string) => {
     console.log('Fetching resumes from:', source);
-    // Reload candidates after fetching resumes
-    loadCandidatesFromBackend();
+    // Force reload candidates after fetching resumes
+    loadCandidatesFromBackend(true);
   };
 
   const stats = [
@@ -266,6 +277,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
               candidates={candidates}
               jobDescription={jobDescription}
               onTabChange={setActiveTab}
+              isLoading={loading}
             />
           </TabsContent>
 

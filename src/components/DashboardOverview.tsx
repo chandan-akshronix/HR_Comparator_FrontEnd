@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
+import { Skeleton } from './ui/skeleton';
 import { 
   Users, 
   FileText, 
@@ -23,9 +24,10 @@ interface DashboardOverviewProps {
   candidates: Candidate[];
   jobDescription: string;
   onTabChange: (tab: string) => void;
+  isLoading?: boolean; // Add loading prop
 }
 
-export function DashboardOverview({ candidates, jobDescription, onTabChange }: DashboardOverviewProps) {
+export function DashboardOverview({ candidates, jobDescription, onTabChange, isLoading = false }: DashboardOverviewProps) {
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
   const [trends, setTrends] = useState<any>({
     candidatesTrend: '0%',
@@ -159,14 +161,29 @@ export function DashboardOverview({ candidates, jobDescription, onTabChange }: D
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-2xl mb-2">Welcome back, HR Team! 👋</h2>
-            <p className="text-blue-100">
-              You have {newCandidatesCount} new candidates to review and {reviewingCount} under review.
-            </p>
+            {isLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-5 w-64 bg-white/20" />
+              </div>
+            ) : (
+              <p className="text-blue-100">
+                You have {newCandidatesCount} new candidates to review and {reviewingCount} under review.
+              </p>
+            )}
           </div>
           <div className="hidden md:block">
             <div className="bg-white/20 backdrop-blur-sm rounded-lg p-4 text-center">
-              <div className="text-3xl mb-1">{highMatchCount}</div>
-              <div className="text-sm text-blue-100">High Matches</div>
+              {isLoading ? (
+                <>
+                  <Skeleton className="h-8 w-12 mb-2 bg-white/30 mx-auto" />
+                  <Skeleton className="h-4 w-20 bg-white/20 mx-auto" />
+                </>
+              ) : (
+                <>
+                  <div className="text-3xl mb-1">{highMatchCount}</div>
+                  <div className="text-sm text-blue-100">High Matches</div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -174,30 +191,49 @@ export function DashboardOverview({ candidates, jobDescription, onTabChange }: D
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((stat, index) => (
-          <Card key={index} className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-start justify-between mb-4">
-                <div className={`${stat.color} p-3 rounded-lg`}>
-                  <stat.icon className="w-5 h-5 text-white" />
+        {isLoading ? (
+          // Skeleton loading cards
+          Array.from({ length: 4 }).map((_, index) => (
+            <Card key={index} className="hover:shadow-lg transition-shadow">
+              <CardContent className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <Skeleton className="w-12 h-12 rounded-lg" />
+                  <Skeleton className="w-12 h-4 rounded" />
                 </div>
-                <div className={`flex items-center gap-1 text-xs ${stat.trendUp ? 'text-green-600' : 'text-muted-foreground'}`}>
-                  {stat.trendUp ? (
-                    <ArrowUpRight className="w-3 h-3" />
-                  ) : (
-                    <ArrowDownRight className="w-3 h-3" />
-                  )}
-                  <span>{stat.trend}</span>
+                <div>
+                  <Skeleton className="h-9 w-16 mb-2" />
+                  <Skeleton className="h-4 w-24 mb-1" />
+                  <Skeleton className="h-3 w-20" />
                 </div>
-              </div>
-              <div>
-                <p className="text-3xl mb-1">{stat.value}</p>
-                <p className="text-sm text-muted-foreground">{stat.title}</p>
-                <p className="text-xs text-muted-foreground mt-1">{stat.description}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          ))
+        ) : (
+          stats.map((stat, index) => (
+            <Card key={index} className="hover:shadow-lg transition-shadow">
+              <CardContent className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className={`${stat.color} p-3 rounded-lg`}>
+                    <stat.icon className="w-5 h-5 text-white" />
+                  </div>
+                  <div className={`flex items-center gap-1 text-xs ${stat.trendUp ? 'text-green-600' : 'text-muted-foreground'}`}>
+                    {stat.trendUp ? (
+                      <ArrowUpRight className="w-3 h-3" />
+                    ) : (
+                      <ArrowDownRight className="w-3 h-3" />
+                    )}
+                    <span>{stat.trend}</span>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-3xl mb-1">{stat.value}</p>
+                  <p className="text-sm text-muted-foreground">{stat.title}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{stat.description}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
       </div>
 
       {/* Main Content Grid */}

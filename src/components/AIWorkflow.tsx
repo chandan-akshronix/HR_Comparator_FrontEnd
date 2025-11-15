@@ -74,11 +74,12 @@ export function AIWorkflow() {
   });
   const [workflowHistory, setWorkflowHistory] = useState<WorkflowHistory[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string>('current');
+  const [currentWorkflowId, setCurrentWorkflowId] = useState<string | null>(null);
 
-  // Load workflow history from database on mount
+  // Load workflow history from database on mount and when currentWorkflowId changes
   useEffect(() => {
     loadWorkflowHistoryFromDB();
-  }, []);
+  }, [currentWorkflowId]);
 
   // When workflowHistory loads and we're viewing a historical workflow, load it
   useEffect(() => {
@@ -92,9 +93,9 @@ export function AIWorkflow() {
       const workflows = await getWorkflowExecutions(0, 10);
       
       // Convert database workflows to frontend format
-      const formattedHistory: WorkflowHistory[] = workflows.map((w: any) => {
-        
-        return {
+      const formattedHistory: WorkflowHistory[] = workflows
+        .map((w: any) => {
+          return {
         id: w.workflow_id,
         timestamp: w.started_at,
         jdId: w.jd_id,
@@ -107,7 +108,7 @@ export function AIWorkflow() {
           return {
             id: a.agent_id,
             name: a.name,
-            status: a.status as AgentStatus,
+            status: normalizeStatus(a.status), // Normalize status from database
             icon: getIconForAgent(a.agent_id),
             timestamp: a.started_at,
             duration: a.duration_ms ? `${(a.duration_ms / 1000).toFixed(1)}s` : undefined,
@@ -126,7 +127,12 @@ export function AIWorkflow() {
           matchRate: w.metrics?.match_rate 
             ? `${w.metrics.match_rate}%` 
             : '0%',
-          topMatches: w.metrics?.top_matches || 0
+          topMatches: w.metrics?.top_matches || 0,
+          bestFit: w.metrics?.best_fit || 0,
+          partialFit: w.metrics?.partial_fit || 0,
+          notFit: w.metrics?.not_fit || 0,
+          candidatesScored: w.metrics?.candidates_scored || 0,
+          highMatches: w.metrics?.high_matches || w.metrics?.top_matches || 0
         },
         progress: {
           completed: w.progress?.completed_agents || 0,
@@ -134,7 +140,9 @@ export function AIWorkflow() {
           percentage: w.progress?.percentage || 0
         }
       };
-      });
+      })
+      // Filter out the current workflow from history (it's shown as "Current Workflow (Live)")
+      .filter((history: WorkflowHistory) => history.id !== currentWorkflowId);
       
       setWorkflowHistory(formattedHistory);
     } catch (err) {
@@ -212,30 +220,34 @@ export function AIWorkflow() {
           analysis = inputData;
           output = inputData;
         } else if (agent.id === 'hr-comparator') {
+          // Use actual saved metrics from the workflow document for this specific workflow
+          const savedMetrics = historyEntry.metrics || {};
+          const savedAgentMetrics = agent.metrics || {};
+          
           inputData = {
-            candidateProfiles: historyEntry.totalCandidates || 0,
-            candidatesScored: historyEntry.totalCandidates || 0,
-            highMatches: historyEntry.metrics?.topMatches || 0,
-            topMatches: `${historyEntry.metrics?.topMatches || 0} candidates ready`
+            candidateProfiles: savedMetrics.totalCandidates || historyEntry.totalCandidates || 0,
+            candidatesScored: savedAgentMetrics.candidatesScored || savedMetrics.candidatesScored || historyEntry.totalCandidates || 0,
+            highMatches: savedAgentMetrics.highMatches || savedMetrics.highMatches || savedMetrics.topMatches || 0,
+            topMatches: `${savedAgentMetrics.topMatches || savedMetrics.topMatches || 0} candidates ready`
           };
           analysis = {
-            totalProcessed: historyEntry.totalCandidates || 0,
-            matchRate: historyEntry.metrics?.matchRate || '0%',
+            totalProcessed: savedMetrics.totalCandidates || historyEntry.totalCandidates || 0,
+            matchRate: savedMetrics.matchRate || '0%',
             avgScore: 'Varied',
-            processingTime: historyEntry.metrics?.processingTime || '0s'
+            processingTime: savedMetrics.processingTime || '0s'
           };
           output = {
-            resultsGenerated: historyEntry.totalCandidates || 0,
-            bestFit: historyEntry.metrics?.bestFit ?? Math.floor((historyEntry.metrics?.topMatches || 0) * 0.5),
-            partialFit: historyEntry.metrics?.partialFit ?? Math.floor((historyEntry.metrics?.topMatches || 0) * 0.3),
-            notFit: historyEntry.metrics?.notFit ?? Math.max(0, (historyEntry.totalCandidates || 0) - (historyEntry.metrics?.topMatches || 0))
+            resultsGenerated: savedMetrics.totalCandidates || historyEntry.totalCandidates || 0,
+            bestFit: savedMetrics.bestFit || 0,
+            partialFit: savedMetrics.partialFit || 0,
+            notFit: savedMetrics.notFit || 0
           };
         }
         
         return {
           id: agent.id,
           name: agent.name,
-          status: agent.status as AgentStatus,
+          status: normalizeStatus(agent.status), // Normalize status from database
           icon: agent.icon || getIconForAgent(agent.id),
           timestamp: agent.timestamp,
           duration: agent.duration,
@@ -247,12 +259,15 @@ export function AIWorkflow() {
         };
       });
       
-      // Properly format metrics (handle both formats)
+      // Properly format metrics (handle both formats) - Use saved metrics from workflow document
       const metricsToSet = {
         totalCandidates: historyEntry.metrics?.totalCandidates || historyEntry.totalCandidates || 0,
         processingTime: historyEntry.metrics?.processingTime || '0s',
         matchRate: historyEntry.metrics?.matchRate || '0%',
-        topMatches: historyEntry.metrics?.topMatches || 0
+        topMatches: historyEntry.metrics?.topMatches || 0,
+        bestFit: historyEntry.metrics?.bestFit || 0,
+        partialFit: historyEntry.metrics?.partialFit || 0,
+        notFit: historyEntry.metrics?.notFit || 0
       };
       
       // Properly format progress
@@ -280,13 +295,58 @@ export function AIWorkflow() {
       const data = await getWorkflowStatus();
       
       if (data.success) {
+        // Check if workflow ID has changed (new workflow started)
+        const previousWorkflowId = currentWorkflowId;
+        const newWorkflowId = data.workflowId || null;
+        
+        // If workflow ID changed, this means a new workflow has started
+        // Clear old data immediately to prevent showing old completed workflow
+        if (previousWorkflowId && newWorkflowId && previousWorkflowId !== newWorkflowId) {
+          console.log('🔄 New workflow detected (ID changed), clearing old data', {
+            oldId: previousWorkflowId,
+            newId: newWorkflowId
+          });
+          // Clear old completed data immediately
+          setAgents([
+            {id: 'jd-reader', name: 'JD Reader (Direct Parsing)', status: 'completed', icon: FileText, description: 'Parsing completed'},
+            {id: 'resume-reader', name: 'Resume Reader (Direct Parsing)', status: 'completed', icon: Users, description: 'Parsing completed'},
+            {id: 'hr-comparator', name: 'HR Comparator Agent (AI)', status: 'in-progress', icon: BarChart3, description: 'AI processing...'}
+          ]);
+          setMetrics({
+            totalCandidates: 0,
+            processingTime: '0s',
+            matchRate: '0%',
+            topMatches: 0
+          });
+          setProgress({
+            completed: 0,
+            total: 3,
+            percentage: 0
+          });
+          // Update workflow ID immediately
+          setCurrentWorkflowId(newWorkflowId);
+          // If the returned data is for the old workflow (completed), ignore it
+          // Wait for the new workflow data to come in
+          if (data.status === 'completed') {
+            console.log('⏭️ Ignoring old completed workflow data, waiting for new workflow to start', {
+              oldId: previousWorkflowId,
+              newId: newWorkflowId
+            });
+            setLoading(false);
+            return; // Don't update with old workflow data
+          }
+        } else if (newWorkflowId) {
+          // Store current workflow ID if it hasn't changed
+          setCurrentWorkflowId(newWorkflowId);
+        }
+        
         // Check if this is a new workflow starting (status = in_progress but no completed agents yet)
         const isNewWorkflow = data.status === 'in_progress' && 
                              data.progress?.completed_agents === 0;
         
         // If new workflow starting and we have old completed data, clear it first
         if (isNewWorkflow && agents.length > 0 && agents.every(a => a.status === 'completed')) {
-          console.log('🔄 New workflow detected, clearing old data');
+          console.log('🔄 New workflow detected (status check), clearing old data');
           // Reset to in-progress state
           setAgents([
             {id: 'jd-reader', name: 'JD Reader (Direct Parsing)', status: 'completed', icon: FileText, description: 'Parsing completed'},
@@ -368,6 +428,18 @@ export function AIWorkflow() {
     }
   };
 
+  // Helper function to normalize status from database format to frontend format
+  const normalizeStatus = (status: any): AgentStatus => {
+    if (status === 'in_progress' || status === 'in-progress') {
+      return 'in-progress';
+    }
+    if (status === 'completed' || status === 'pending' || status === 'idle') {
+      return status as AgentStatus;
+    }
+    // Default to idle for unknown statuses
+    return 'idle';
+  };
+
   const getStatusColor = (status: AgentStatus) => {
     switch (status) {
       case 'completed': return 'bg-green-500 border-green-500';
@@ -392,6 +464,7 @@ export function AIWorkflow() {
       case 'in-progress': return Clock;
       case 'pending': return Clock;
       case 'idle': return Clock;
+      default: return Clock; // Add default case to prevent undefined
     }
   };
 
@@ -454,14 +527,6 @@ export function AIWorkflow() {
               <Button 
                 variant="outline" 
                 size="sm"
-                className="bg-white/5 hover:bg-white/10 text-white border-white/20 backdrop-blur-sm"
-              >
-                <Download className="w-4 h-4 mr-2" />
-                Export Report
-              </Button>
-              <Button 
-                variant="outline" 
-                size="sm"
                 onClick={loadWorkflowStatus}
                 disabled={loading}
                 className="bg-white/5 hover:bg-white/10 text-white border-white/20 backdrop-blur-sm"
@@ -487,7 +552,7 @@ export function AIWorkflow() {
                 ) : (
                   <>
                     <Play className="w-4 h-4 mr-2" />
-                    Start
+                    Resume
                   </>
                 )}
               </Button>
