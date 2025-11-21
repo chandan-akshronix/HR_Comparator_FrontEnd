@@ -1,36 +1,26 @@
-# Multi-stage build for React Frontend
-# Stage 1: Build
+# Stage 1: Build React app
 FROM node:20-alpine AS builder
-
 WORKDIR /app
 
-# Copy package files
 COPY package*.json ./
-
-# Install dependencies
 RUN npm ci
 
-# Copy source code
 COPY . .
+RUN npm run build   # ← outputs to /app/build (not dist)
 
-# Build the application
-RUN npm run build
+# Stage 2: Serve with nginx
+FROM nginx:alpine-slim
 
-# Stage 2: Production
-FROM nginx:alpine
-
-# Install wget for healthcheck
 RUN apk add --no-cache wget
 
-# Copy built files from builder
+# THIS IS THE CORRECT FOLDER
 COPY --from=builder /app/build /usr/share/nginx/html
 
-# Copy nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Expose port
 EXPOSE 80
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
 
+CMD ["nginx", "-g", "daemon off;"]
