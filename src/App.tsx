@@ -9,30 +9,36 @@ type View = 'home' | 'login' | 'dashboard';
 
 export default function App() {
   // Check if user is already logged in on mount
-  const [currentView, setCurrentView] = useState<View>(() => {
-    const token = getAuthToken();
-    return token ? 'dashboard' : 'home';
-  });
+  // Start with 'home' and let useEffect verify the token before switching to dashboard
+  const [currentView, setCurrentView] = useState<View>('home');
   const [isLoading, setIsLoading] = useState(true);
 
   // Verify token on mount
   useEffect(() => {
     const verifyAuth = async () => {
       const token = getAuthToken();
-      
+
       if (token) {
-        // Optional: Verify token is still valid with backend
         try {
-          // You can add a /auth/verify endpoint to check token validity
-          // For now, we'll just trust the token exists
-          setCurrentView('dashboard');
+          // Verify token with backend
+          const isValid = await import('./services/api').then(m => m.verifyToken());
+
+          if (isValid) {
+            setCurrentView('dashboard');
+          } else {
+            console.warn('Token validation failed, logging out...');
+            clearAuthToken();
+            setCurrentView('home');
+          }
         } catch (error) {
-          console.error('Token validation failed:', error);
+          console.error('Token validation error:', error);
           clearAuthToken();
           setCurrentView('home');
         }
+      } else {
+        setCurrentView('home');
       }
-      
+
       setIsLoading(false);
     };
 
