@@ -25,8 +25,7 @@ pipeline {
     stages {
         stage('Git Checkout') {
             steps {
-                git branch: 'main', url: 'REPLACE_WITH_YOUR_GIT_REPO_URL'
-                // Example: git branch: 'main', url: 'https://github.com/chandan-akshronix/HR_Comparator_FrontEnd.git'
+                git branch: 'main', url: 'https://github.com/chandan-akshronix/HR_Comparator_FrontEnd.git'
                 // For private repos, add: credentialsId: 'github-cred'
                 echo "✅ Code checked out successfully"
             }
