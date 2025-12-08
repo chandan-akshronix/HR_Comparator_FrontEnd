@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    tools {
+        nodejs 'nodejs'  // Name of NodeJS installation configured in Jenkins
+    }
+
     environment {
         // Scanner and Tools
         SCANNER_HOME = '/opt/sonar-scanner'  // Path where SonarQube scanner is installed
