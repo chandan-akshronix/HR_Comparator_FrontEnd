@@ -61,7 +61,7 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 script {
-                    withSonarQubeEnv('SonarQube') {
+                    withSonarQubeEnv('sonar-scanner') {
                         sh """
                             ${SCANNER_HOME}/bin/sonar-scanner \
                               -Dsonar.projectKey=hr-frontend \
