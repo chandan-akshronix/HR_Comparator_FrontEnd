@@ -7,7 +7,7 @@ pipeline {
 
     environment {
         // Scanner and Tools
-        SCANNER_HOME = '/opt/sonar-scanner'  // Path where SonarQube scanner is installed
+        SCANNER_HOME = tool 'sonar-scanner'
         
         // Azure Container Registry
         ACR_NAME = 'hracrregistry'
@@ -61,7 +61,7 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 script {
-                    withSonarQubeEnv('sonar-scanner') {
+                    withSonarQubeEnv('sonar-token') {
                         sh """
                             ${SCANNER_HOME}/bin/sonar-scanner \
                               -Dsonar.projectKey=hr-frontend \
