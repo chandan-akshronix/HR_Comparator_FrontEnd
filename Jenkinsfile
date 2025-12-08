@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         // Scanner and Tools
-        SCANNER_HOME = tool 'sonar-scanner'
+        SCANNER_HOME = '/opt/sonar-scanner'  // Path where SonarQube scanner is installed
         
         // Azure Container Registry
         ACR_NAME = 'hracrregistry'
@@ -25,8 +25,7 @@ pipeline {
     stages {
         stage('Git Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/chandan-akshronix/HR_Comparator_FrontEnd.git'
-                // For private repos, add: credentialsId: 'github-cred'
+                git branch: 'main', url: 'https://github.com/chandan-akshronix/HR_Comparator_FrontEnd.git', credentialsId: 'github-cred'
                 echo "✅ Code checked out successfully"
             }
         }
@@ -251,8 +250,7 @@ EOF
             echo "❌ Pipeline failed. Please check the logs for details."
         }
         always {
-            echo "Cleaning up workspace..."
-            cleanWs()
+            echo "Pipeline execution completed."
         }
     }
 }
