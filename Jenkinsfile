@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -46,6 +47,18 @@ pipeline {
             }
         }
 
+        stage('Trivy File System Scan') {
+            steps {
+                script {
+                    echo "Running Trivy file system scan..."
+                    sh """
+                        trivy fs --severity HIGH,CRITICAL --format table .
+                    """
+                    echo "✅ Trivy file system scan completed"
+                }
+            }
+        }
+
         stage('Build Application') {
             steps {
                 script {
@@ -84,30 +97,7 @@ pipeline {
             }
         }
 
-        stage('OWASP Dependency Check') {
-            steps {
-                script {
-                    echo "Running OWASP Dependency Check..."
-                    dependencyCheck additionalArguments: '--scan ./ --format HTML --format XML --out dependency-check-report',
-                                    odcInstallation: 'DC'
-                    
-                    dependencyCheckPublisher pattern: 'dependency-check-report/dependency-check-report.xml'
-                    echo "✅ OWASP Dependency Check completed"
-                }
-            }
-        }
 
-        stage('Trivy File System Scan') {
-            steps {
-                script {
-                    echo "Running Trivy file system scan..."
-                    sh """
-                        trivy fs --severity HIGH,CRITICAL --format table .
-                    """
-                    echo "✅ Trivy file system scan completed"
-                }
-            }
-        }
 
         stage('Package Artifacts') {
             steps {
@@ -122,7 +112,6 @@ pipeline {
                           --exclude='node_modules' \
                           --exclude='.git' \
                           --exclude='artifacts' \
-                          --exclude='dependency-check-report' \
                           .
                         
                         # Generate metadata file
