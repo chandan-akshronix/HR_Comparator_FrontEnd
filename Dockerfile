@@ -13,8 +13,8 @@ FROM nginx:alpine-slim
 
 RUN apk add --no-cache wget
 
-# Copy Vite build output (dist folder, not build)
-COPY --from=builder /app/dist /usr/share/nginx/html
+# Copy Vite build output (configured as 'build' in vite.config.ts)
+COPY --from=builder /app/build /usr/share/nginx/html
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
