@@ -240,7 +240,7 @@ EOF
                             sed -i 's|image: hracrregistry.azurecr.io/hr-frontend:.*|image: ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}|g' deployment.yaml
                             
                             # Apply Kubernetes manifests
-                            kubectl apply -f deployment.yaml
+                            kubectl apply -f k8s/deployment.yaml
                             
                             # Wait for rollout to complete
                             kubectl rollout status deployment/frontend -n ${K8S_NAMESPACE} --timeout=5m
