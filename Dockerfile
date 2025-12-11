@@ -6,15 +6,15 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
-RUN npm run build   # ← outputs to /app/build (not dist)
+RUN npm run build
 
 # Stage 2: Serve with nginx
 FROM nginx:alpine-slim
 
 RUN apk add --no-cache wget
 
-# THIS IS THE CORRECT FOLDER
-COPY --from=builder /app/build /usr/share/nginx/html
+# Copy Vite build output (dist folder, not build)
+COPY --from=builder /app/dist /usr/share/nginx/html
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
