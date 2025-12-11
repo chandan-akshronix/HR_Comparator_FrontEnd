@@ -23,6 +23,11 @@ pipeline {
         NEXUS_REPOSITORY = 'hr-frontend-artifacts'
         NEXUS_CREDENTIAL_ID = 'nexus-credentials'
         
+        // AKS Cluster
+        AKS_CLUSTER_NAME = 'hr-aks-cluster'  // Replace with your AKS cluster name
+        AKS_RESOURCE_GROUP = 'akshronix'
+        K8S_NAMESPACE = 'hr-app'
+        
         // Versioning
         ARTIFACT_VERSION = "${env.BUILD_NUMBER}"
     }
@@ -207,6 +212,43 @@ EOF
                         """
                     }
                     echo "✅ Docker images pushed to ACR successfully"
+                }
+            }
+        }
+
+        stage('Deploy to AKS') {
+            steps {
+                script {
+                    echo "Deploying to Azure Kubernetes Service..."
+                    
+                    sh """
+                        # Get AKS credentials
+                        az aks get-credentials --resource-group ${AKS_RESOURCE_GROUP} --name ${AKS_CLUSTER_NAME} --overwrite-existing
+                        
+                        # Update deployment image tag to current build number
+                        cd HR_Comparator_FrontEnd/k8s
+                        sed -i 's|image: hracrregistry.azurecr.io/hr-frontend:.*|image: ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}|g' deployment.yaml
+                        
+                        # Apply Kubernetes manifests
+                        kubectl apply -f deployment.yaml
+                        
+                        # Wait for rollout to complete
+                        kubectl rollout status deployment/frontend -n ${K8S_NAMESPACE} --timeout=5m
+                        
+                        # Display deployment info
+                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                        echo "Deployment Status:"
+                        kubectl get deployment frontend -n ${K8S_NAMESPACE}
+                        echo ""
+                        echo "Pods:"
+                        kubectl get pods -n ${K8S_NAMESPACE} -l app=frontend
+                        echo ""
+                        echo "Service:"
+                        kubectl get svc frontend-service -n ${K8S_NAMESPACE}
+                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    """
+                    
+                    echo "✅ Deployment to AKS completed successfully"
                 }
             }
         }
