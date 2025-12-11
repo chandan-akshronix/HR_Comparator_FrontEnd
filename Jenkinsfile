@@ -236,7 +236,7 @@ EOF
                             az aks get-credentials --resource-group ${AKS_RESOURCE_GROUP} --name ${AKS_CLUSTER_NAME} --overwrite-existing
                             
                             # Update deployment image tag to current build number
-                            cd HR_Comparator_FrontEnd/k8s
+                            cd k8s
                             sed -i 's|image: hracrregistry.azurecr.io/hr-frontend:.*|image: ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}|g' deployment.yaml
                             
                             # Apply Kubernetes manifests
